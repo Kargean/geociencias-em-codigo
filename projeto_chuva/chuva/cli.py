@@ -68,8 +68,10 @@ def _cmd_banco(args) -> int:
         print(f"{saida} já existe; apague ou escolha outro nome.", file=sys.stderr)
         return 2
     con = banco.construir_banco(args.estacoes, registros, saida)
-    n = con.execute("SELECT COUNT(*) FROM chuva_diaria").fetchone()[0]
-    con.close()
+    try:
+        n = con.execute("SELECT COUNT(*) FROM chuva_diaria").fetchone()[0]
+    finally:
+        con.close()  # no Windows, um arquivo de banco aberto não pode ser apagado nem movido
     print(f"banco criado em {saida} com {n} registros")
     return 0
 
@@ -88,6 +90,8 @@ def _cmd_sql(args) -> int:
     except FileNotFoundError as erro:
         print(erro, file=sys.stderr)
         return 2
+    finally:
+        con.close()  # em todos os caminhos, inclusive o de erro (veja test_cli.py)
     if not linhas:
         print("(sem linhas)")
         return 0

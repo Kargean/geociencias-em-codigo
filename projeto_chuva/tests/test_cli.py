@@ -1,11 +1,13 @@
 """Testes da linha de comando (chuva/cli.py): chamamos main() com uma lista de argumentos e olhamos a saída."""
 import contextlib
 import io
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from chuva import cli
+from chuva import banco, cli
 
 
 def rodar(*argv):
@@ -18,7 +20,38 @@ def rodar(*argv):
     return codigo, saida.getvalue(), erro.getvalue()
 
 
+@contextlib.contextmanager
+def espiar_conexoes():
+    """Guarda todas as conexões que o programa abrir, para conferirmos depois se foram fechadas.
+
+    Por que isso importa: no Linux e no macOS dá para apagar um arquivo de banco que ainda está aberto; no Windows
+    não (WinError 32). Uma conexão esquecida só quebra o teste no Windows, a não ser que o teste olhe para ela.
+    """
+    abertas = []
+    original = banco.conectar
+
+    def espia(*args, **kwargs):
+        con = original(*args, **kwargs)
+        abertas.append(con)
+        return con
+
+    with mock.patch.object(banco, "conectar", espia):
+        yield abertas
+
+
+def conexao_fechada(con):
+    try:
+        con.execute("SELECT 1")
+    except sqlite3.ProgrammingError:  # "Cannot operate on a closed database"
+        return True
+    return False
+
+
 class Comandos(unittest.TestCase):
+    def assertTudoFechado(self, abertas):
+        self.assertTrue(abertas, "o espião não viu nenhuma conexão: o teste não está testando nada")
+        self.assertEqual([c for c in abertas if not conexao_fechada(c)], [], "conexão(ões) esquecida(s) abertas")
+
     def test_qualidade(self):
         codigo, saida, _ = rodar("qualidade")
         self.assertEqual(codigo, 0)
@@ -54,23 +87,28 @@ class Comandos(unittest.TestCase):
         self.assertNotEqual(padrao, largo)
 
     def test_sql_consulta_inexistente(self):
-        codigo, _, erro = rodar("sql", "nao_existe")
+        with espiar_conexoes() as abertas:
+            codigo, _, erro = rodar("sql", "nao_existe")
         self.assertEqual(codigo, 2)
         self.assertIn("não encontrada", erro)
+        self.assertTudoFechado(abertas)  # também no caminho de erro
 
     def test_banco_cria_e_recusa_sobrescrever(self):
         with tempfile.TemporaryDirectory() as pasta:
             destino = str(Path(pasta) / "chuva.db")
-            codigo, saida, _ = rodar("banco", "--saida", destino)
-            self.assertEqual(codigo, 0)
-            self.assertIn("2920 registros", saida)
-            codigo2, _, erro = rodar("banco", "--saida", destino)
-            self.assertEqual(codigo2, 2)
-            self.assertIn("já existe", erro)
-            # e o banco criado funciona com o comando sql
-            codigo3, saida3, _ = rodar("sql", "01_resumo_estacoes", "--banco", destino)
-            self.assertEqual(codigo3, 0)
-            self.assertIn("Planície", saida3)
+            with espiar_conexoes() as abertas:
+                codigo, saida, _ = rodar("banco", "--saida", destino)
+                self.assertEqual(codigo, 0)
+                self.assertIn("2920 registros", saida)
+                codigo2, _, erro = rodar("banco", "--saida", destino)
+                self.assertEqual(codigo2, 2)
+                self.assertIn("já existe", erro)
+                # e o banco criado funciona com o comando sql
+                codigo3, saida3, _ = rodar("sql", "01_resumo_estacoes", "--banco", destino)
+                self.assertEqual(codigo3, 0)
+                self.assertIn("Planície", saida3)
+            # Sem isto, o Windows não consegue apagar a pasta temporária ao sair do bloco `with` (arquivo em uso).
+            self.assertTudoFechado(abertas)
 
     def test_arquivo_inexistente(self):
         codigo, _, erro = rodar("qualidade", "/nao/existe.csv")
