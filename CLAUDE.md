@@ -54,8 +54,8 @@ cd projeto_chuva && python -m unittest discover -s tests -v   # testes do projet
 
 ## O que ainda não foi verificado (atualize ao confirmar)
 
-* Renderização pelo Quarto e publicação no GitHub Pages (a primeira execução do fluxo é o teste real).
-* Execução do `testes.yml` no GitHub Actions (os mesmos comandos foram executados localmente em Python 3.13; 3.11 e 3.12 só no GitHub).
+* **Confirmado no GitHub (07/10/2026):** `testes.yml` verde em Python 3.11, 3.12 e 3.13; `publicar.yml` verde (testes, renderização do Quarto e deploy no Pages). O Pages precisou ser ativado à mão (aba Settings **do repositório**, não a do perfil → Pages → Source: GitHub Actions) e o job `deploy` reexecutado.
+* **Lido na página publicada** (por leitor de texto): os capítulos P0-00 aparecem na barra lateral, sem erro, sem saídas repetidas entre aspas (o `Saida._ipython_display_` parece funcionar) e sem referências quebradas. **Não visto:** a aparência (cores, figuras, celular). Se a aparência incomodar, abrir uma issue `melhoria`.
+* A figura das quatro áreas do Git é servida como PNG (o arquivo existe), mas não vimos a imagem.
 * A interface do GitHub muda com o tempo: passos de clique nos capítulos (issues, pull requests, rulesets, Insights) devem ser conferidos na tela atual. Os comandos `gh` tiveram as opções conferidas na ajuda da versão 2.89.0, mas não foram executados contra o GitHub.
-* O `Saida._ipython_display_` do laboratório de Git (`geocodigo/laboratorio_git.py`) deve impedir que o Quarto repita, como texto entre aspas, a saída dos comandos quando ela é a última linha de um bloco. Foi conferido só na prévia estática; se a renderização real mostrar linhas duplicadas entre aspas, é isso.
 * `pytest`, `coverage`, `pre-commit` e `act` são citados como caminho futuro e **não** foram executados.
