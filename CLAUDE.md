@@ -25,6 +25,7 @@ Este arquivo é a memória do projeto. Leia-o ao começar uma sessão e atualize
 4. **Convenções declaradas** (ângulos, sistemas de coordenadas, unidades, limiares) no início de cada assunto.
 5. Cada capítulo termina com **erros clássicos**, **exercícios com gabarito conferido em código** e **autoavaliação** em quatro níveis (reconheço, explico, executo, ensino).
 6. Decisões de limpeza e de limiar ficam **em constantes nomeadas e documentadas**, nunca escondidas.
+7. **Recursos abertos são fechados em `finally`** (conexões de banco, arquivos). O autor usa Windows, onde arquivo aberto não pode ser apagado; o Linux perdoa. Testes de código que abre arquivos devem conferir o fechamento.
 
 ## Como rodar os testes
 
