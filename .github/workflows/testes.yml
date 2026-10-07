@@ -13,13 +13,19 @@ permissions:
 
 jobs:
   testes:
-    name: Python ${{ matrix.python }}
-    runs-on: ubuntu-latest
+    name: Python ${{ matrix.python }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         # Entre aspas! Sem aspas, 3.10 seria lido como o número 3.1.
         python: ["3.11", "3.12", "3.13"]
+        include:
+          # Um teste que só roda no Linux não avisa de problemas do Windows (arquivo aberto não pode ser apagado,
+          # por exemplo). Uma combinação a mais custa poucos segundos e pega essa classe de erro.
+          - os: windows-latest
+            python: "3.13"
     defaults:
       run:
         working-directory: projeto_chuva

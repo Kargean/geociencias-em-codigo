@@ -408,8 +408,8 @@ Leitura guiada, bloco a bloco:
 | `name: Testes` | o nome que aparece na aba *Actions* e no selo |
 | `on:` | dispara em `push` na `main`, em **todo** `pull_request` e manualmente (`workflow_dispatch` cria o botão *Run workflow*) |
 | `permissions: contents: read` | o fluxo só precisa **ler** o código; dar o mínimo de permissão é uma regra de segurança |
-| `runs-on: ubuntu-latest` | máquina Linux gratuita para repositório público |
-| `strategy.matrix.python` | repete o job para Python 3.11, 3.12 e 3.13; `fail-fast: false` deixa as três terminarem mesmo que uma falhe |
+| `runs-on: ${{ matrix.os }}` | a máquina vem da matriz: Linux gratuito para repositório público e, numa combinação extra, Windows |
+| `strategy.matrix` | repete o job para Python 3.11, 3.12 e 3.13 no Linux, mais Python 3.13 no Windows (`include`); `fail-fast: false` deixa todas terminarem mesmo que uma falhe |
 | `defaults.run.working-directory` | os comandos `run` partem da pasta `projeto_chuva` |
 | `actions/checkout` | baixa o código do repositório na máquina |
 | `actions/setup-python` | instala a versão do Python pedida pela matriz |

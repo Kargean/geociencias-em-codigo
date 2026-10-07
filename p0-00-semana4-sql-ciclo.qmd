@@ -421,6 +421,7 @@ Cada um virou um teste, uma regra ou um aviso. Eles são o argumento mais forte 
 | `description: ... (ex.: ...)` quebrava o YAML | validação do arquivo | aviso nos erros clássicos da Semana 3 |
 | laboratório sem identidade de Git nos gabaritos | execução dos gabaritos | `Laboratorio(identidade=True)` |
 | a figura do fluxo tinha setas sobre o texto | olhar a imagem gerada | ajuste de geometria |
+| um teste passava no Linux e falhava no Windows: o comando `sql` não fechava o banco | o primeiro leitor rodou os testes no Windows | `con.close()` em todos os caminhos, espião de conexões em `test_cli.py` e Windows na matriz do Actions |
 
 ### O ritual de 15 minutos por semana
 
@@ -484,6 +485,7 @@ O Notion guarda **o seu estudo** (módulos, níveis, datas); o GitHub guarda **o
 8. **Calcular um índice só uma vez.** Sem uma segunda conta independente (Python contra SQL), você não sabe se está certo.
 9. **Confiar só nos dados reais para testar.** Eles raramente exercitam os casos de borda; monte o caso pequeno.
 10. **Abrir um release sem tag, ou sem atualizar o `CHANGELOG`.** A versão não diz o que mudou.
+11. **Esquecer de fechar a conexão com o banco.** No Linux e no macOS nada acontece; no Windows, o arquivo fica preso e não pode ser apagado (`WinError 32`). Feche em `finally`, e teste em mais de um sistema.
 
 ## Exercícios {#sec-s4-exercicios}
 
