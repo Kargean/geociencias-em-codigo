@@ -1,0 +1,790 @@
+# Semana 3 · GitHub: ramos, revisão e testes automáticos {#sec-p000-s3}
+
+::: {.callout-note icon=false}
+## Neste capítulo
+
+**Pergunta que guia tudo:** como mexer no projeto sem medo de estragar o que funciona, trabalhar em mais de um computador e fazer o GitHub conferir, sozinho, que os testes continuam passando?
+
+**Você vai ser capaz de:**
+
+1. criar **ramos** (*branches*), juntá-los (*merge*) e ler o desenho da história com `git log --graph`;
+2. usar **dois computadores** com o mesmo GitHub, entender a recusa do `push` e **resolver um conflito**;
+3. **ver** a história no terminal e no site (quem mudou o quê, quando, e em qual commit uma linha nasceu);
+4. registrar trabalho em **issues** e propor mudanças em **pull requests** que fecham os issues sozinhos;
+5. escolher entre **merge, squash e rebase** sabendo o que cada um faz com a história;
+6. ler e escrever um **workflow do GitHub Actions** que roda os testes a cada mudança, e exibir o selo de testes no `README`;
+7. **proteger a `main`** para que só entre código com testes verdes, e achar o commit que quebrou algo com `git bisect`.
+
+**Pré-requisitos:** Semanas 1 e 2 (você tem um repositório de treino no GitHub com `chuva/` e `tests/`).
+
+**Tempo sugerido:** 3 h, em duas sessões: (1) até a @sec-s3-ver, no laboratório do livro e depois no seu repositório de treino; (2) da @sec-s3-issues até o fim, no site do GitHub.
+:::
+
+## O que o GitHub acrescenta ao Git {#sec-s3-o-que}
+
+Quase tudo da Semana 1 era **Git**: um programa no seu computador. O **GitHub** é um serviço na internet que guarda um repositório Git e acrescenta ferramentas em volta dele. Separar as duas coisas evita muita confusão:
+
+| É do Git (funciona sem internet) | É do GitHub (existe só no site) |
+|:--|:--|
+| commit, ramo, merge, tag, `log`, `diff`, `blame`, `bisect` | **issues**: lista de tarefas, erros e ideias |
+| conflitos e como resolvê-los | **pull requests**: pedido de revisão antes de juntar |
+| `push` e `pull` (copiar entre repositórios) | **Actions**: roda programas (os testes) a cada mudança |
+| | **rulesets**: regras como "só entra na `main` com testes verdes" |
+| | **releases**, **Pages** (site), **Dependabot**, selo de testes |
+
+O que você faz **no site** muda de aparência com o tempo. Por isso, sempre que este capítulo descreve um clique, há um aviso. O que você faz **no terminal** (Git e `gh`) muda pouco, e é a base.
+
+## Ramos: mexer sem estragar {#sec-s3-ramos}
+
+Um **ramo** (*branch*) é uma linha de commits paralela. A `main` guarda a versão que funciona; num ramo você experimenta, quebra, conserta, e só junta de volta quando estiver bom. Criar um ramo é praticamente de graça: o Git só cria um novo rótulo apontando para um commit.
+
+Para este capítulo, o laboratório monta um repositório parecido com o seu da Semana 2 (um arquivo de limiares e uma função `dias_de_chuva`) e o liga a um GitHub de mentirinha, como na Semana 1:
+
+```{python}
+#| echo: false
+from geocodigo.laboratorio_git import Laboratorio
+
+lab = Laboratorio(identidade=True)
+url = lab.criar_github("seu-usuario", "chuva-estacoes")
+lab.cd("casa/chuva-estacoes")
+lab.git("init", mostrar=False)
+lab.escrever("README.md", "# Chuva em estações\n\nProjeto de treino do módulo P0-00.\n", mostrar=False)
+lab.escrever("chuva/limiares.py", "LIMITE_MM_DIA = 300.0\nLIMIAR_DIA_CHUVOSO_MM = 1.0\n", mostrar=False)
+lab.escrever("chuva/resumo.py", '''from .limiares import LIMIAR_DIA_CHUVOSO_MM
+
+
+def dias_de_chuva(valores):
+    return sum(1 for v in valores if v is not None and v >= LIMIAR_DIA_CHUVOSO_MM)
+''', mostrar=False)
+lab.git("add .", mostrar=False)
+lab.git('commit -m "Primeira versão: limiares e dias_de_chuva"', mostrar=False)
+lab.git(f"remote add origin {url}", mostrar=False)
+lab.git("push -u origin main", mostrar=False)
+print("(laboratório pronto: um commit, enviado ao GitHub de mentirinha)")
+```
+
+Queremos acrescentar o cálculo do maior período seco. Em vez de mexer direto na `main`, criamos o ramo `feat/periodo-seco` (por convenção, `feat/` é novidade, `fix/` é conserto e `docs/` é texto):
+
+```{python}
+#| echo: false
+lab.git("switch -c feat/periodo-seco")
+lab.escrever("chuva/periodo_seco.py", '''from .limiares import LIMIAR_DIA_CHUVOSO_MM
+
+
+def maior_periodo_seco(valores):
+    maior = atual = 0
+    for v in valores:
+        seco = v is not None and v < LIMIAR_DIA_CHUVOSO_MM
+        atual = atual + 1 if seco else 0
+        maior = max(maior, atual)
+    return maior
+''')
+lab.git("add chuva/periodo_seco.py")
+lab.git('commit -m "Adiciona maior_periodo_seco"')
+```
+
+`git switch -c NOME` cria o ramo **e** muda para ele (o `-c` é de *create*). Para voltar: `git switch main`. Enquanto isso, a `main` não sente nada. Para deixar a coisa interessante, vamos fazer a `main` andar também, como se alguém tivesse corrigido o `README` no meio-tempo:
+
+```{python}
+#| echo: false
+lab.git("switch main")
+lab.escrever("README.md", "# Chuva em estações\n\nProjeto de treino do módulo P0-00.\n\nDados: sintéticos.\n")
+lab.git('commit -am "README: avisa que os dados são sintéticos"')
+lab.git("log --oneline --graph --all --decorate")
+```
+
+Leia o desenho de baixo para cima. A história **bifurcou** a partir do primeiro commit: um braço é a `main` (com o commit do `README`), o outro é o ramo `feat/periodo-seco`. `HEAD -> main` diz onde você está; `origin/main` é a `main` do GitHub, ainda no primeiro commit, porque você não deu `push`. Agora juntamos:
+
+```{python}
+#| echo: false
+lab.git("merge feat/periodo-seco")
+lab.git("log --oneline --graph --decorate")
+lab.git("branch -d feat/periodo-seco")
+lab.git("push")
+```
+
+O Git criou um **commit de merge**, com **dois pais** (o desenho mostra os dois braços voltando a se encontrar). A frase `Merge made by the 'ort' strategy` significa que o Git conseguiu juntar sozinho, porque as duas pessoas (você em dois ramos) mexeram em arquivos diferentes. `branch -d` apaga o rótulo do ramo já incorporado (os commits continuam na história). Se o ramo **não** estivesse juntado, o Git recusaria o `-d`, para você não perder trabalho.
+
+::: {.callout-note}
+## Fast-forward: quando não há bifurcação
+
+Se a `main` **não** tivesse andado enquanto você trabalhava no ramo, o `merge` seria um *fast-forward*: o Git só move o rótulo `main` para a frente, sem criar commit de merge. No Exercício 1 você prova isso.
+:::
+
+## Dois computadores, um GitHub {#sec-s3-dois}
+
+Você trabalha em casa e no IFF? Os dois computadores são **clones** do mesmo repositório do GitHub. O GitHub é o ponto de encontro. A regra de ouro: **antes de começar a trabalhar, `git pull`; ao terminar, `git push`.**
+
+Vamos simular o segundo computador (a pasta `iff` do laboratório): clonar, mudar um valor e enviar.
+
+```{python}
+#| echo: false
+lab.cd("iff")
+lab.git(f"clone {url}")
+lab.cd("iff/chuva-estacoes")
+lab.git("log --oneline -3")
+lab.escrever("chuva/limiares.py", "LIMITE_MM_DIA = 350.0  # maior valor do histórico local\nLIMIAR_DIA_CHUVOSO_MM = 1.0\n")
+lab.git('commit -am "Limite diário sobe para 350 mm (histórico local)"')
+lab.git("push")
+```
+
+Agora volte ao computador de casa, **sem ter feito `pull`**, e mude a mesma linha de outro jeito:
+
+```{python}
+#| echo: false
+lab.cd("casa/chuva-estacoes")
+lab.escrever("chuva/limiares.py", "LIMITE_MM_DIA = 400.0  # região serrana\nLIMIAR_DIA_CHUVOSO_MM = 1.0\n")
+lab.git('commit -am "Limite diário sobe para 400 mm (região serrana)"')
+lab.git("push", ok=False)
+```
+
+O `push` foi **recusado**, e a mensagem explica: `fetch first` quer dizer "o GitHub tem commits que você não tem; traga-os antes". Isso protege o trabalho do outro computador de ser sobrescrito. **Nunca** resolva isso com `git push --force`: forçar apaga do GitHub o commit do IFF.
+
+O caminho certo é trazer e juntar:
+
+```{python}
+#| echo: false
+lab.git("pull", ok=False)
+```
+
+Nas versões recentes do Git, o `pull` se recusa a escolher por você quando as histórias **divergiram**. Há três modos: juntar (*merge*), reaplicar os seus commits por cima (*rebase*) ou aceitar só avanço simples (*fast-forward only*). Para quem está começando, use o merge, que não reescreve nada:
+
+```{python}
+#| echo: false
+lab.git("pull --no-rebase", ok=False)
+```
+
+`CONFLICT (content)` significa que os dois lados mudaram **a mesma linha** e o Git não sabe qual vale. Isso não é erro seu: é o Git pedindo uma decisão humana.
+
+::: {.callout-tip}
+## Evitar a pergunta toda vez
+
+Se quiser que o Git sempre junte por merge quando divergir, rode uma vez `git config --global pull.rebase false`. O rebase (`true`) deixa a história mais linear, mas reescreve commits; só vale a pena depois que você dominar o básico.
+:::
+
+## Resolver um conflito {#sec-s3-conflito}
+
+O merge parou no meio. O `status` diz exatamente em que ponto estamos, e o arquivo guarda as duas versões, marcadas:
+
+```{python}
+#| echo: false
+lab.git("status")
+lab.mostrar_arquivo("chuva/limiares.py")
+```
+
+Como ler as marcas:
+
+* `<<<<<<< HEAD` até `=======`: a **sua** versão (a do commit em que você está);
+* `=======` até `>>>>>>>`: a versão que **veio do outro lado** (o rótulo depois do `>>>>>>>` identifica o commit; aqui é o do IFF);
+* as linhas fora das marcas já foram juntadas sozinhas.
+
+A resolução é um trabalho de **editar**: decida o que fica, apague as três linhas de marca (`<<<<<<<`, `=======`, `>>>>>>>`), salve, diga ao Git que resolveu (`git add`) e conclua com um commit. Aqui, decidimos por 400 mm e registramos o porquê num comentário:
+
+```{python}
+#| echo: false
+lab.escrever("chuva/limiares.py", "LIMITE_MM_DIA = 400.0  # decisão: região serrana (o 350 do IFF era o histórico de uma só estação)\nLIMIAR_DIA_CHUVOSO_MM = 1.0\n")
+lab.git("add chuva/limiares.py")
+lab.git('commit -m "Resolve conflito: limite diário 400 mm"')
+lab.git("push")
+```
+
+::: {.callout-warning}
+## Duas armadilhas
+
+1. **Commitar com as marcas dentro do arquivo.** O Python não roda um arquivo com `<<<<<<<`. Antes do `git add`, procure por `<<<<<<<` no arquivo (`git diff --check` também avisa). Os testes da Semana 2 acusariam, e é uma das razões de ter testes.
+2. **Desistir no meio.** Se travar, `git merge --abort` devolve tudo ao estado de antes do `pull`. Nada se perde.
+:::
+
+Nem todo conflito é de código. Um dado, um `README` e um arquivo de configuração conflitam do mesmo jeito. O que muda é quem decide: aqui, uma decisão **científica** (qual limite diário para a região) foi tomada por uma pessoa e ficou registrada no comentário e na mensagem do commit.
+
+## Ver a história {#sec-s3-ver}
+
+Uma história só serve se você consegue **lê-la**. O terminal e o site mostram a mesma coisa de jeitos diferentes. No terminal:
+
+```{python}
+#| echo: false
+lab.git("log --oneline --graph --decorate --all")
+```
+
+Os dois braços do conflito aparecem, e o commit de topo (o da resolução) tem **dois pais**: um é o seu, o outro é o do IFF. Quer ver isso em números?
+
+```{python}
+#| echo: false
+saida_pais = lab.git("rev-list --parents -n 1 HEAD")
+n_pais_merge = len(saida_pais.split()) - 1
+print("pais do commit de merge:", n_pais_merge)
+```
+
+Quatro perguntas que a história responde, cada uma com um comando:
+
+**Quem mudou esta linha, e quando?** `git blame`:
+
+```{python}
+#| echo: false
+lab.git("blame chuva/limiares.py")
+```
+
+Cada linha mostra o commit (`^` no início do hash indica o primeiro commit do repositório), o autor, a data e o texto. A linha do limite é do commit de resolução; a do limiar de dia chuvoso é da primeira versão, nunca mexida.
+
+**Quando apareceu esta palavra?** `git log -S"texto"` lista os commits que **fizeram a contagem daquele texto mudar**:
+
+```{python}
+#| echo: false
+lab.git('log -S"serrana" --oneline')
+```
+
+**O que mudou neste commit?** `git show --stat` mostra a mensagem e quais arquivos mudaram, e `git show` completo mostra as linhas.
+
+**O que difere entre dois pontos?** `git diff main..outro-ramo` (ou entre dois commits). No site, o equivalente é a página de comparação.
+
+### No site
+
+Em `https://github.com/SEU-USUARIO/chuva-estacoes`:
+
+* **Commits:** o número de commits na página inicial leva à lista completa; clicar em um commit mostra o `diff` colorido (vermelho saiu, verde entrou);
+* **Arquivo → History / Blame:** na página de qualquer arquivo, os botões *History* e *Blame* fazem o que `git log -- arquivo` e `git blame` fazem;
+* **Comparar:** o endereço `.../compare/main...feat/periodo-seco` mostra tudo que o ramo traz em relação à `main`;
+* **Insights → Network:** desenha o grafo de ramos, parecido com o `log --graph`;
+* **Tecla `.`:** em um repositório, abre o editor do navegador (github.dev) para ler ou editar sem clonar.
+
+::: {.callout-warning}
+## Conferir na tela atual
+
+Nomes de botões e menus do GitHub mudam sem aviso. Os que aparecem aqui foram descritos a partir da documentação e do uso comum e **não** foram conferidos na sua conta. Se um nome não bater, procure pela função (história, comparação, grafo); ela quase sempre continua lá.
+:::
+
+## Issues: registrar o que precisa ser feito {#sec-s3-issues}
+
+Um **issue** é um cartão numerado (`#1`, `#2`...) onde se registra um erro, uma ideia ou uma tarefa. É a memória do projeto: quando você se lembrar de algo no meio de outra coisa, registre e siga; quando voltar, está tudo lá.
+
+Um bom issue tem: um **título** que dê para entender sem abrir ("Dias de chuva usa `>` em vez de `>=`"), o que **aconteceu** e o que **esperava**, e o **lugar** (arquivo, capítulo). O repositório do livro traz **formulários** prontos em `.github/ISSUE_TEMPLATE/`; este é o de erro no livro:
+
+```{python}
+#| echo: false
+from pathlib import Path
+
+print(Path(".github/ISSUE_TEMPLATE/erro-no-livro.yml").read_text(encoding="utf-8"))
+```
+
+Cada item do `body` vira um campo do formulário no site (`input` é uma linha, `textarea` é um texto longo, `dropdown` é uma lista), e `required: true` obriga a preencher. As `labels:` marcam o issue automaticamente, **mas só se o rótulo já existir no repositório**. Para criar os dois rótulos do livro:
+
+```bash
+gh label create erro-no-livro --description "Número errado, código que não roda, explicação incorreta" --color D73A4A
+gh label create melhoria --description "Algo que pode ficar melhor" --color 0E8A16
+```
+
+Criar um issue pelo terminal (útil para anotar sem tirar as mãos do teclado):
+
+```bash
+gh issue create --title "Dias de chuva usa > em vez de >=" \
+  --body "Com valor exatamente 1,0 mm o dia não conta como chuvoso; o ETCCDI usa >= 1 mm." \
+  --label erro-no-livro
+```
+
+Outros recursos que valem conhecer quando houver muitos issues: **milestones** (agrupam issues numa meta, como "v0.2.0") e **Projects** (um quadro estilo kanban com as colunas *A fazer / Fazendo / Feito*). Para uma pessoa só, rótulos e milestones bastam.
+
+## Pull requests: propor, testar, juntar {#sec-s3-pr}
+
+Um **pull request** (PR) é o pedido: "estas mudanças, que estão neste ramo, podem entrar na `main`?". Mesmo trabalhando sozinho, o PR vale por três motivos: (1) é o lugar onde os **testes automáticos rodam** antes de entrar; (2) é onde você **relê o seu próprio diff** com olhos de revisor; (3) deixa um registro do **porquê** da mudança.
+
+O ciclo completo, do issue ao código na `main`:
+
+1. alguém abre o **issue** `#7`;
+2. você cria um ramo (`git switch -c fix/limiar-dia-chuvoso`) e faz commits pequenos;
+3. `git push -u origin fix/limiar-dia-chuvoso`;
+4. abre o **PR** (o site mostra uma faixa amarela "Compare & pull request" logo após o push; ou use o terminal);
+5. os **testes rodam sozinhos** (Actions) e o PR mostra ✅ ou ❌;
+6. você relê o diff na aba *Files changed* e corrige o que achar;
+7. com tudo verde, **junta** (*merge*); o ramo é apagado;
+8. o issue `#7` **fecha sozinho**, se o PR tiver escrito `Closes #7`.
+
+O mesmo, pelo terminal, com a CLI `gh`:
+
+```bash
+git switch -c fix/limiar-dia-chuvoso
+# ... editar, git add, git commit ...
+git push -u origin fix/limiar-dia-chuvoso
+gh pr create --fill --body "Closes #7"      # --fill usa a mensagem dos commits como título
+gh pr checks --watch                          # acompanha os testes até acabarem (se disser que não há verificações, espere alguns segundos e repita)
+gh pr merge --squash --delete-branch          # junta (squash) e apaga o ramo
+```
+
+O repositório do livro já traz um **modelo de PR** (`.github/pull_request_template.md`), que o GitHub preenche sozinho ao abrir um PR:
+
+```{python}
+#| echo: false
+print(Path(".github/pull_request_template.md").read_text(encoding="utf-8"))
+```
+
+**Palavras que fecham issues.** Se o corpo do PR (ou de um commit) tiver `Closes #7`, `Fixes #7` ou `Resolves #7` (e as variantes `close/closes/closed`, `fix/fixes/fixed`, `resolve/resolves/resolved`), o issue fecha quando o PR for juntado. Detalhe que pega muita gente: isso só funciona se o PR for juntado no **ramo padrão** do repositório (normalmente a `main`).
+
+### Três jeitos de juntar {#sec-s3-metodos}
+
+No botão de merge do PR há três opções. Elas dão **histórias diferentes** para o mesmo trabalho. Veja com um ramo de três commits e uma `main` que andou um commit enquanto isso:
+
+```{python}
+#| echo: false
+def repo_com_ramo(nome_ramo="feat/indice", n=3):
+    """Repositório com um commit, um ramo de n commits e uma main que andou mais um commit."""
+    l = Laboratorio(identidade=True)
+    l.cd("projeto")
+    l.git("init", mostrar=False)
+    l.escrever("README.md", "# Projeto\n", mostrar=False)
+    l.git("add .", mostrar=False)
+    l.git('commit -m "Começa o projeto"', mostrar=False)
+    l.git(f"switch -c {nome_ramo}", mostrar=False)
+    for i in range(1, n + 1):
+        l.escrever(f"indice{i}.py", f"def indice{i}():\n    return {i}\n", mostrar=False)
+        l.git(f"add indice{i}.py", mostrar=False)
+        l.git(f'commit -m "Adiciona indice{i}"', mostrar=False)
+    l.git("switch main", mostrar=False)
+    l.escrever("NOTAS.md", "anotações\n", mostrar=False)
+    l.git("add NOTAS.md", mostrar=False)
+    l.git('commit -m "Adiciona notas"', mostrar=False)
+    return l
+
+
+def n_commits_na_main(l):
+    return int(l.git("rev-list --count main", mostrar=False))
+
+
+print("### 1. Create a merge commit (merge com commit de junção)")
+lab_a = repo_com_ramo()
+lab_a.git('merge --no-ff feat/indice -m "Merge pull request #1 de feat/indice"', mostrar=False)
+lab_a.git("log --oneline --graph")
+n_merge = n_commits_na_main(lab_a)
+
+print("\n### 2. Squash and merge (os três commits viram um)")
+lab_b = repo_com_ramo()
+lab_b.git("merge --squash feat/indice", mostrar=False)
+lab_b.git('commit -m "Adiciona indices (#1)"', mostrar=False)
+lab_b.git("log --oneline --graph")
+n_squash = n_commits_na_main(lab_b)
+
+print("\n### 3. Rebase and merge (os três commits são reaplicados em fila)")
+lab_c = repo_com_ramo()
+lab_c.git("switch feat/indice", mostrar=False)
+lab_c.git("rebase main", mostrar=False)
+lab_c.git("switch main", mostrar=False)
+lab_c.git("merge --ff-only feat/indice", mostrar=False)
+lab_c.git("log --oneline --graph")
+n_rebase = n_commits_na_main(lab_c)
+print(f"\ncommits na main: merge={n_merge}, squash={n_squash}, rebase={n_rebase}")
+```
+
+| Método | O que a história ganha | Boa escolha quando |
+|:--|:--|:--|
+| **Merge commit** | todos os commits do ramo **mais** um commit de junção; o desenho mostra a bifurcação | o ramo tem uma história que vale preservar e você quer ver *quando* foi incorporado |
+| **Squash** | **um** commit com o resultado todo; os commits intermediários somem da `main` | commits do ramo são bagunçados ("conserta", "agora vai") e a mudança é uma ideia só |
+| **Rebase** | os commits do ramo, **reescritos** (novos hashes) e em fila, sem commit de junção | você quer uma história linear e os commits do ramo já são bons |
+
+Sem preferência forte, use **squash** nos PRs pequenos: a `main` fica com um commit por mudança, e a mensagem vem do título do PR (por padrão, acompanhada da lista dos commits; o administrador pode mudar isso). O rebase **reescreve** commits: nunca faça isso em ramo que outra pessoa já baixou. No site, os administradores do repositório escolhem quais dos três botões ficam disponíveis (em *Settings → General → Pull Requests*).
+
+## Testes automáticos: GitHub Actions {#sec-s3-actions}
+
+Rodar os testes na sua máquina depende de você lembrar. O **GitHub Actions** roda por você: a cada `push` e a cada PR, o GitHub liga uma máquina virtual limpa, baixa o seu código, instala o Python e executa os comandos que você escreveu. Se algum falhar, o PR fica ❌ e você sabe antes de juntar.
+
+Vocabulário:
+
+* **workflow**: um arquivo YAML em `.github/workflows/` que descreve o que rodar;
+* **evento** (`on`): o que dispara (um `push`, um PR, o clique em um botão);
+* **job**: um conjunto de passos numa mesma máquina;
+* **runner**: a máquina virtual (`ubuntu-latest` é Linux);
+* **step**: um passo, que ou *usa* uma ação pronta (`uses`) ou *roda* um comando (`run`);
+* **matrix**: repete o job com valores diferentes (aqui, três versões do Python).
+
+Este é o workflow do projeto, tal como está no repositório do livro (o texto abaixo é lido do arquivo real, então nunca fica desatualizado):
+
+```{python}
+#| echo: false
+texto_workflow = Path(".github/workflows/testes.yml").read_text(encoding="utf-8")
+print(texto_workflow)
+```
+
+Leitura guiada, bloco a bloco:
+
+| Trecho | O que faz |
+|:--|:--|
+| `name: Testes` | o nome que aparece na aba *Actions* e no selo |
+| `on:` | dispara em `push` na `main`, em **todo** `pull_request` e manualmente (`workflow_dispatch` cria o botão *Run workflow*) |
+| `permissions: contents: read` | o fluxo só precisa **ler** o código; dar o mínimo de permissão é uma regra de segurança |
+| `runs-on: ubuntu-latest` | máquina Linux gratuita para repositório público |
+| `strategy.matrix.python` | repete o job para Python 3.11, 3.12 e 3.13; `fail-fast: false` deixa as três terminarem mesmo que uma falhe |
+| `defaults.run.working-directory` | os comandos `run` partem da pasta `projeto_chuva` |
+| `actions/checkout` | baixa o código do repositório na máquina |
+| `actions/setup-python` | instala a versão do Python pedida pela matriz |
+| `Mostrar versões` | guarda no registro a versão do Python e do SQLite (ajuda a entender falhas) |
+| `Rodar os testes` | **o que importa**: o mesmo comando que você roda no seu computador |
+
+Dois detalhes que custam horas a quem não sabe:
+
+**1. Versões do Python entre aspas.** Em YAML, `3.10` sem aspas é lido como o número `3.1`. Veja:
+
+```{python}
+import yaml
+
+print("sem aspas:", yaml.safe_load("python: [3.9, 3.10, 3.11]"))
+print("com aspas:", yaml.safe_load('python: ["3.9", "3.10", "3.11"]'))
+```
+
+Sem aspas, a "versão 3.10" viraria `3.1`. É por isso que a matriz do projeto escreve `["3.11", "3.12", "3.13"]`. Por isso os exemplos da documentação do GitHub e do `actions/setup-python` escrevem as versões entre aspas.
+
+**2. O `working-directory` vale para o seu repositório de treino?** No repositório do **livro**, o projeto mora em `projeto_chuva/`. No seu repositório de **treino**, `chuva/` e `tests/` ficam na **raiz**. Então a cópia que você usa lá é a mesma, **sem** o bloco `defaults`. O código abaixo gera essa versão a partir do arquivo real:
+
+```{python}
+bloco_defaults = "    defaults:\n      run:\n        working-directory: projeto_chuva\n"
+assert bloco_defaults in texto_workflow
+workflow_de_treino = texto_workflow.replace(bloco_defaults, "")
+print(workflow_de_treino)
+```
+
+Salve este texto como `.github/workflows/testes.yml` no seu repositório de treino.
+
+### O que o Actions faz, você pode fazer à mão
+
+Um workflow não tem mágica: cada `run` é um comando de terminal. Os dois da sequência, rodados aqui na pasta do projeto:
+
+```{python}
+import subprocess
+import sys
+
+for comando in (["--version"], ["-c", "import sqlite3; print('SQLite', sqlite3.sqlite_version)"]):
+    proc = subprocess.run([sys.executable, *comando], capture_output=True, text=True)
+    print((proc.stdout + proc.stderr).strip())
+```
+
+O resultado depende da sua máquina. É exatamente o que o passo `Mostrar versões` imprime no GitHub, só que na máquina virtual de lá. E o passo `Rodar os testes` é o `python -m unittest discover -s tests -v` da Semana 2.
+
+### O que acontece no site
+
+Depois que o arquivo estiver no repositório e você fizer `push`:
+
+1. a aba **Actions** lista as execuções (*runs*). Cada uma tem um ícone: amarelo (rodando), ✅ verde (passou), ❌ vermelho (falhou);
+2. clicar em uma execução mostra os jobs (um por versão do Python); clicar no job abre o **registro**, passo a passo, com a mesma saída que você viu no seu terminal;
+3. no PR, a seção de *checks* repete o resultado e leva ao registro.
+
+Pelo terminal:
+
+```bash
+gh run list --limit 5            # as últimas execuções
+gh run watch                     # acompanha a execução em andamento
+gh run view --log-failed         # mostra só o registro dos passos que falharam
+gh workflow run testes.yml       # roda sob demanda (precisa do evento workflow_dispatch)
+```
+
+### O selo de testes no README
+
+O selo (*badge*) é uma imagem que o GitHub gera com o estado da última execução. Coloque no topo do `README.md`, trocando `SEU-USUARIO` e `chuva-estacoes`:
+
+```markdown
+[![Testes](https://github.com/SEU-USUARIO/chuva-estacoes/actions/workflows/testes.yml/badge.svg)](https://github.com/SEU-USUARIO/chuva-estacoes/actions/workflows/testes.yml)
+```
+
+### Vermelho e verde de verdade (faça no seu repositório)
+
+Na Semana 2 você viu um teste falhar no seu computador. Agora veja o GitHub acusar:
+
+1. crie um ramo: `git switch -c teste/vermelho`;
+2. estrague de propósito um valor esperado em um teste (por exemplo, troque `(None, "codigo")` por `(None, "vazio")`);
+3. `git commit -am "Quebra de propósito"`, `git push -u origin teste/vermelho`, abra o PR;
+4. espere o ❌, abra o registro e **ache a linha** do teste que falhou;
+5. desfaça o estrago (`git revert HEAD`), `git push`, espere o ✅;
+6. feche o PR **sem juntar** e apague o ramo.
+
+### Custo e segurança
+
+* **Custo:** em repositório **público**, o Actions é gratuito. Em **privado**, a conta gratuita tem uma cota mensal de minutos (2 000 por mês no momento da escrita; confira o valor atual na documentação de cobrança). Runners Linux são os mais baratos; Windows e macOS gastam mais minutos por minuto real.
+* **Segredos:** dados sensíveis (tokens, chaves de API) nunca vão no YAML nem no repositório. Se um dia precisar, guarde em *Settings → Secrets and variables → Actions* e use `${{ secrets.NOME }}`. Por isso este fluxo não precisa de nenhum.
+* **Permissões mínimas:** o bloco `permissions` acima é a prática recomendada.
+* **Ações de terceiros:** `uses: dono/acao@versão` baixa e roda código de outra pessoa na sua máquina virtual. Use ações oficiais (`actions/*`) ou muito conhecidas. `@v7` é uma etiqueta que o autor da ação pode mover; só o **hash completo de um commit** é imutável. Para ações oficiais, `@v7` é um compromisso razoável; para ações de terceiros, considere fixar o hash e deixar o Dependabot propor as atualizações.
+* **Atualizações:** o **Dependabot** abre PRs sozinho quando uma ação usada ganha versão nova. Esta é a configuração do projeto:
+
+```{python}
+#| echo: false
+print(Path(".github/dependabot.yml").read_text(encoding="utf-8"))
+```
+
+## Proteger a main {#sec-s3-regras}
+
+Com PRs e testes automáticos, falta a trava: impedir que alguém (inclusive você num dia cansado) empurre direto na `main` sem passar pelos testes. No GitHub isso é um **ruleset** (conjunto de regras) ou, no modelo mais antigo, uma *branch protection rule*.
+
+Receita sugerida para o repositório de treino:
+
+1. *Settings → Rules → Rulesets → New ruleset → New branch ruleset*;
+2. nome `proteger-main`, *Enforcement status* **Active**;
+3. em *Target branches*, inclua o **ramo padrão**;
+4. marque **Require a pull request before merging** (deixe o número de aprovações em **0**: quem abre o PR não pode aprová-lo, então exigir 1 aprovação trancaria quem trabalha sozinho);
+5. marque **Require status checks to pass** e escolha as verificações `Python 3.11`, `Python 3.12` e `Python 3.13` (elas só aparecem na lista depois de o workflow ter rodado ao menos uma vez, e talvez só enquanto a execução for recente; o nome vem do campo `name:` do job);
+6. marque **Block force pushes**;
+7. salve, e tente `git push` direto na `main`: deve ser recusado. Se o push **passar**, abra a lista de *Bypass* do ruleset: quem está nela (administradores, por exemplo) pode ignorar as regras.
+
+::: {.callout-warning}
+## Disponibilidade e tela
+
+Rulesets estão disponíveis em repositórios **públicos** da conta gratuita; em repositórios **privados**, dependem do plano (confira). Nomes e posições das opções podem ter mudado desde a escrita. O princípio não muda: **PR obrigatório, testes verdes obrigatórios, sem force-push**.
+:::
+
+## Achar o commit que quebrou: git bisect {#sec-s3-bisect}
+
+Um teste que passava deixou de passar, e há trinta commits entre a última vez que você sabe que estava certo e hoje. Olhar um por um é demorado. O `git bisect` faz **busca binária**: testa o commit do meio, descobre em qual metade está o defeito, e repete. Com 30 commits, acha em cerca de 5 passos. Se você tiver um comando que sai com código 0 quando está bom e com código diferente de 0 quando está ruim (como os testes), ele faz tudo sozinho. (Dois códigos têm significado especial: **125** diz "não dá para testar este commit, pule", e **128 ou mais** aborta a busca.)
+
+Exemplo no laboratório: seis commits, a função `media` ganhou um defeito em algum deles.
+
+```{python}
+#| echo: false
+lab_bi = Laboratorio(identidade=True)
+lab_bi.cd("p")
+lab_bi.git("init", mostrar=False)
+lab_bi.escrever("conta.py", "def media(v):\n    v = [x for x in v if x is not None]\n    return sum(v) / len(v)\n", mostrar=False)
+lab_bi.escrever("teste.py", "from conta import media\n\nif media([1, None, 3]) != 2.0:\n    raise SystemExit('media errada')\nprint('ok')\n", mostrar=False)
+lab_bi.git("add .", mostrar=False)
+lab_bi.git('commit -m "Primeira versão"', mostrar=False)
+mensagens = ["Comenta o código", "Atualiza as notas", "Simplifica a média", "Mais notas", "Ainda mais notas"]
+for i, msg in enumerate(mensagens, start=2):
+    lab_bi.escrever("notas.txt", f"versão {i}\n", mostrar=False)
+    if msg == "Simplifica a média":
+        lab_bi.escrever("conta.py", "def media(v):\n    return sum(x for x in v if x is not None) / len(v)\n", mostrar=False)
+    lab_bi.git("add .", mostrar=False)
+    lab_bi.git(f'commit -m "{msg}"', mostrar=False)
+lab_bi.git("log --oneline")
+primeiro = lab_bi.git("rev-list --max-parents=0 HEAD", mostrar=False)
+```
+
+Passo a passo: dizemos qual commit sabemos que está **ruim** (o atual) e qual sabemos que estava **bom** (o primeiro), e deixamos o Git testar com `python -B teste.py` (o `-B` impede o Python de **gravar** *bytecode*; veja o aviso mais abaixo):
+
+```{python}
+#| echo: false
+lab_bi.git("bisect start")
+lab_bi.git("bisect bad HEAD")
+lab_bi.git(f"bisect good {primeiro}")
+saida_bisect = lab_bi.git("bisect run python -B teste.py", ok=False)
+lab_bi.git("bisect reset")
+```
+
+Leia o que aconteceu: o Git foi parando em commits do meio (`Atualiza as notas`, depois `Mais notas`, depois `Simplifica a média`), rodou `python -B teste.py` em cada um (`ok` = bom, mensagem de erro = ruim) e, ao fim, apontou `Simplifica a média` como o **primeiro commit ruim**, com o autor, a data e o resumo do que mudou. Foram **três** testes para seis commits; a economia só aparece de verdade em listas longas (para 30 commits seriam cerca de cinco testes). O `bisect reset` devolve o repositório ao estado normal; sem ele, você continuaria parado no commit de teste, então não esqueça dele.
+
+::: {.callout-note}
+## O que o bisect exige
+O comando de teste precisa ser **determinístico** (mesmo resultado a cada rodada) e rodar em **todos** os commits do intervalo. Um teste que depende de internet ou de hora do dia confunde a busca. Há ainda uma armadilha do Python: se um arquivo troca de conteúdo mantendo o **mesmo tamanho** dentro do mesmo segundo (o que acontece quando o `bisect` troca de commit muito rápido), o Python pode reaproveitar o *bytecode* antigo guardado em `__pycache__` e testar o código errado. Por isso o exemplo usa `python -B`, que impede o Python de **gravar** esse cache. Atenção ao limite: o `-B` não *apaga* nem ignora um `__pycache__` que já exista; se você já rodou o teste sem ele, apague as pastas `__pycache__` antes de começar o `bisect` (ou defina a variável de ambiente `PYTHONDONTWRITEBYTECODE=1` desde a primeira execução). (Esse problema apareceu de verdade ao montar o Exercício 3 deste módulo: o `bisect` apontou o último commit em vez do verdadeiro.)
+:::
+
+## Segurança básica do dia a dia {#sec-s3-seguranca}
+
+* **Autenticação em dois fatores:** ative na sua conta (*Settings → Password and authentication*). O GitHub já a exige de quem contribui com código.
+* **Segredos nunca no repositório:** token, senha, chave de API. Se vazar um segredo, **revogue primeiro** (no serviço de origem), limpe depois. Apagar o commit não adianta: ele já foi copiado.
+* **Revise antes do `git add .`:** `git status` e `git diff --staged`.
+* **Repositório privado para dado real:** dado de campo ainda não publicado, coordenada de ponto sensível (sítio arqueológico, nascente em propriedade privada) ou dado de terceiros não vai para repositório público.
+* **Dependências:** mantenha o Dependabot ligado. Ele cobre as ações do Actions neste projeto; para pacotes Python, entra a partir do P1.
+
+## Erros clássicos {#sec-s3-erros}
+
+1. **Resolver `push` recusado com `--force`.** Você apaga o trabalho do outro computador. A saída é `pull`, resolver, `push`. Se alguma vez precisar forçar **em um ramo seu**, use `--force-with-lease`, que recusa se alguém mexeu desde a sua última leitura.
+2. **Commitar com marcas de conflito dentro do arquivo.** Procure por `<<<<<<<` antes de `git add`.
+3. **Esquecer o `pull` ao chegar em outro computador.** Todo conflito evitável começa aqui.
+4. **Versão do Python sem aspas no YAML** (`3.10` vira `3.1`).
+5. **Dois-pontos solto em valor de YAML.** Um texto como `description: Capítulo e seção (ex.: Semana 2)` quebra, porque `ex.: ` parece uma nova chave. Apareceu de verdade ao escrever os formulários deste módulo, com a mensagem `mapping values are not allowed here`. Solução: ponha o valor entre aspas.
+6. **`Closes #7` em PR que não vai para a `main`.** O issue não fecha.
+7. **Esquecer o `working-directory`** quando o projeto não está na raiz: o Actions diz que não achou os testes (ou que rodou zero). Confira o diretório antes de culpar o código.
+8. **Terminações de linha (CRLF no Windows, LF no Linux).** Sem regra, um arquivo pode "mudar inteiro" no `diff` só porque o sistema trocou as quebras de linha. O arquivo `.gitattributes` do projeto fixa LF e, de quebra, protege o `SHA256SUMS` dos dados.
+9. **Editar pelo site e esquecer.** O seu computador fica para trás. Comece sempre com `git pull`.
+10. **Rebase em ramo compartilhado.** Reescreve commits que outras pessoas já têm.
+
+## Exercícios {#sec-s3-exercicios}
+
+**Exercício 1 (fast-forward ou merge?).** Num repositório em que a `main` **não andou** desde que o ramo foi criado, `git merge ramo` cria commit de junção? E `git merge --no-ff ramo`? Preveja, depois prove contando os pais do commit de topo com `git rev-list --parents -n 1 HEAD`.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 1
+```python
+l1 = Laboratorio(identidade=True)
+l1.cd("p")
+l1.git("init", mostrar=False)
+l1.escrever("a.txt", "1\n", mostrar=False)
+l1.git("add .", mostrar=False)
+l1.git('commit -m "um"', mostrar=False)
+l1.git("switch -c ramo", mostrar=False)
+l1.escrever("b.txt", "2\n", mostrar=False)
+l1.git("add .", mostrar=False)
+l1.git('commit -m "dois"', mostrar=False)
+l1.git("switch main", mostrar=False)
+l1.git("branch ramo-bis ramo", mostrar=False)            # segundo rótulo no mesmo commit, para repetir de outro jeito
+
+saida_ff = l1.git("merge ramo", mostrar=False)
+pais_ff = len(l1.git("rev-list --parents -n 1 HEAD", mostrar=False).split()) - 1
+l1.git("reset --hard HEAD~1", mostrar=False)             # main volta para "um"
+saida_noff = l1.git('merge --no-ff ramo-bis -m "junta"', mostrar=False)
+pais_noff = len(l1.git("rev-list --parents -n 1 HEAD", mostrar=False).split()) - 1
+print(pais_ff, pais_noff)
+assert "Fast-forward" in saida_ff and pais_ff == 1
+assert "Merge made" in saida_noff and pais_noff == 2
+```
+Resultado: sem bifurcação, `git merge ramo` faz **fast-forward** (o topo tem **1** pai: nenhum commit de junção). Com `--no-ff` o Git cria o commit de junção, com **2** pais. Muita gente usa `--no-ff` quando quer que o histórico registre que existiu um ramo.
+:::
+
+**Exercício 2 (abortar, depois escolher um lado).** Provoque um conflito em um arquivo `cfg.txt` (`limite=300` na base; `limite=350` no ramo `a`; `limite=400` na `main`). (a) Tente juntar e **aborte**, provando que tudo voltou ao estado anterior; (b) junte de novo e resolva ficando com a versão do ramo `a`, sem editar à mão, usando `git restore --theirs`.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 2
+```python
+l2 = Laboratorio(identidade=True)
+l2.cd("p")
+l2.git("init", mostrar=False)
+l2.escrever("cfg.txt", "limite=300\n", mostrar=False)
+l2.git("add .", mostrar=False)
+l2.git('commit -m "base"', mostrar=False)
+l2.git("switch -c a", mostrar=False)
+l2.escrever("cfg.txt", "limite=350\n", mostrar=False)
+l2.git('commit -am "350"', mostrar=False)
+l2.git("switch main", mostrar=False)
+l2.escrever("cfg.txt", "limite=400\n", mostrar=False)
+l2.git('commit -am "400"', mostrar=False)
+
+saida = l2.git("merge a", mostrar=False, ok=False)
+assert "CONFLICT" in saida and "<<<<<<<" in l2.ler("cfg.txt")
+l2.git("merge --abort", mostrar=False)
+assert l2.git("status --short", mostrar=False) == "" and l2.ler("cfg.txt") == "limite=400\n"     # (a) tudo como antes
+
+l2.git("merge a", mostrar=False, ok=False)
+l2.git("restore --theirs cfg.txt", mostrar=False)                                                # (b) fica com o lado "a"
+assert l2.ler("cfg.txt") == "limite=350\n"
+l2.git("add cfg.txt", mostrar=False)
+l2.git('commit -m "Fica com 350"', mostrar=False)
+assert len(l2.git("rev-list --parents -n 1 HEAD", mostrar=False).split()) - 1 == 2
+print(l2.ler("cfg.txt").strip(), "| status:", repr(l2.git("status --short", mostrar=False)))
+```
+Resultado: depois do `merge --abort`, o `status` fica vazio e o arquivo continua com `limite=400`. Depois do segundo `merge`, `restore --theirs` pega a versão do ramo que está sendo incorporado (`a`); o commit final tem dois pais. Atenção: `--ours`/`--theirs` **descartam por completo** o outro lado; use quando a decisão for mesmo "um ou outro".
+:::
+
+**Exercício 3 (bisect).** Há nove commits. Em um deles, alguém trocou `LIMIAR = 1.0` por `LIMIAR = 0.1`. Descubra qual, com `git bisect run`, e prove que bastaram **4 testes ou menos**.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 3
+```python
+import re
+
+l3 = Laboratorio(identidade=True)
+l3.cd("p")
+l3.git("init", mostrar=False)
+l3.escrever("limiar.py", "LIMIAR = 1.0\n", mostrar=False)
+l3.escrever("teste.py", "from limiar import LIMIAR\n\nif LIMIAR != 1.0:\n    raise SystemExit('limiar mudou')\n", mostrar=False)
+l3.escrever("notas.txt", "passo 1\n", mostrar=False)
+l3.git("add .", mostrar=False)
+l3.git('commit -m "Começa"', mostrar=False)
+for i in range(2, 10):
+    l3.escrever("notas.txt", f"passo {i}\n", mostrar=False)
+    if i >= 6:
+        l3.escrever("limiar.py", "LIMIAR = 0.1\n", mostrar=False)
+    l3.git("add .", mostrar=False)
+    l3.git(f'commit -m "{"Ajusta o limiar de chuva" if i == 6 else f"Passo {i}"}"', mostrar=False)
+
+primeiro_l3 = l3.git("rev-list --max-parents=0 HEAD", mostrar=False)
+l3.git("bisect start", mostrar=False)
+l3.git("bisect bad HEAD", mostrar=False)
+l3.git(f"bisect good {primeiro_l3}", mostrar=False)
+saida_l3 = l3.git("bisect run python -B teste.py", mostrar=False, ok=False)
+achado = re.search(r"([0-9a-f]{40}) is the first bad commit", saida_l3).group(1)
+assunto = l3.git(f"log -1 --format=%s {achado}", mostrar=False)
+n_testes = saida_l3.count("running")
+l3.git("bisect reset", mostrar=False)
+print(assunto, "| testes rodados:", n_testes)
+assert assunto == "Ajusta o limiar de chuva" and n_testes <= 4
+```
+Resultado: o primeiro commit ruim é `Ajusta o limiar de chuva`, achado em poucos testes (a busca binária em 9 commits precisa de cerca de log₂ 9 ≈ 3 a 4).
+:::
+
+**Exercício 4 (desfazer um merge inteiro).** Um ramo com três arquivos foi juntado por `--no-ff` e depois se descobriu que não devia ter entrado. `git revert HEAD` sozinho falha com um merge. Descubra a opção que falta, desfaça o merge e prove que (a) os três arquivos saíram, (b) a história **não** foi reescrita (continua com todos os commits, mais um).
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 4
+```python
+l4 = repo_com_ramo()
+l4.git('merge --no-ff feat/indice -m "Merge feat/indice"', mostrar=False)
+antes = set(l4.git("ls-files", mostrar=False).split())
+n_antes = n_commits_na_main(l4)
+tentativa = l4.git("revert HEAD --no-edit", mostrar=False, ok=False)      # sem -m, o Git não sabe qual "lado" manter
+assert "is a merge but no -m option was given" in tentativa
+l4.git("revert -m 1 HEAD --no-edit", mostrar=False)                       # -m 1: mantém o lado do 1º pai (a main)
+depois = set(l4.git("ls-files", mostrar=False).split())
+print(sorted(antes - depois), n_antes, n_commits_na_main(l4))
+assert antes - depois == {"indice1.py", "indice2.py", "indice3.py"}
+assert n_commits_na_main(l4) == n_antes + 1
+```
+Resultado: o merge tem **dois** pais, então o `revert` precisa saber qual lado é a "linha principal". `-m 1` significa "o primeiro pai", que é a `main` de onde você chamou o merge. Os três arquivos saem e a história ganha **um** commit de desfazer. Atenção: se mais tarde você quiser reincorporar o mesmo ramo, o Git vai achar que o trabalho já entrou; será preciso reverter o *revert* antes.
+:::
+
+**Desafio (simular o Actions antes de empurrar).** Escreva uma função `simular_workflow(arquivo_yaml, raiz)` que lê o workflow, entra na pasta do `working-directory` e roda, em ordem, cada comando dos passos `run`, parando no primeiro que falhar e devolvendo `(True, None)` ou `(False, nome_do_passo)`. Rode sobre o `testes.yml` real e depois sobre uma cópia do projeto com um defeito plantado para provar que ela acusa.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do desafio
+```python
+import shlex
+import shutil
+import tempfile
+
+import yaml
+
+
+def simular_workflow(arquivo_yaml, raiz):
+    fluxo = yaml.safe_load(Path(arquivo_yaml).read_text(encoding="utf-8"))
+    job = next(iter(fluxo["jobs"].values()))
+    pasta = Path(raiz) / job.get("defaults", {}).get("run", {}).get("working-directory", ".")
+    for passo in job["steps"]:
+        if "run" not in passo:
+            continue                                   # passos `uses` (checkout, setup-python) não têm comando local
+        for linha in passo["run"].strip().splitlines():
+            argumentos = shlex.split(linha)
+            if argumentos[0] == "python":
+                argumentos[0] = sys.executable         # usa o Python que está rodando esta página
+            if subprocess.run(argumentos, cwd=pasta, capture_output=True, text=True).returncode != 0:
+                return False, passo.get("name", linha)
+    return True, None
+
+
+resultado_real = simular_workflow(".github/workflows/testes.yml", ".")
+
+raiz_copia = Path(tempfile.mkdtemp(prefix="simulacao-"))
+shutil.copytree("projeto_chuva", raiz_copia / "projeto_chuva", ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.db"))
+(raiz_copia / ".github" / "workflows").mkdir(parents=True)
+shutil.copy(".github/workflows/testes.yml", raiz_copia / ".github" / "workflows" / "testes.yml")
+alvo = raiz_copia / "projeto_chuva" / "chuva" / "qualidade.py"
+alvo.write_text(alvo.read_text(encoding="utf-8").replace("LIMITE_MM_DIA = 300.0", "LIMITE_MM_DIA = 30.0"), encoding="utf-8")
+resultado_quebrado = simular_workflow(raiz_copia / ".github" / "workflows" / "testes.yml", raiz_copia)
+shutil.rmtree(raiz_copia, ignore_errors=True)
+
+print(resultado_real, resultado_quebrado)
+assert resultado_real == (True, None)
+assert resultado_quebrado == (False, "Rodar os testes")
+```
+Resultado: sobre o projeto correto, `(True, None)`; com o limite diário rebaixado de 300 para 30 mm (defeito plantado), a função devolve `(False, 'Rodar os testes')`, o mesmo passo que ficaria ❌ no GitHub. Limites desta versão: ela só entende comandos simples (sem `&&`, sem `|`, sem variáveis `${{ }}`) e ignora os passos `uses`. Para o dia a dia, a ferramenta `act` simula o Actions inteiro numa máquina local, mas exige Docker. No P1 você verá `pre-commit`, que roda verificações **antes** de cada commit.
+:::
+
+## Entregável da semana {#sec-s3-entregavel}
+
+No **seu repositório de treino**, tudo pelo fluxo de PR (nada direto na `main`, a partir do passo 5):
+
+1. crie os rótulos `erro-no-livro` e `melhoria` (`gh label create`) e abra **um issue** real, por exemplo "Adicionar teste do limiar exato de 1,0 mm";
+2. crie `.github/workflows/testes.yml` com a **versão de treino** (sem `working-directory`), commit e `push` na `main`; confira o ✅ na aba *Actions*;
+3. coloque o **selo de testes** no `README.md`;
+4. crie o ramo `teste/vermelho`, quebre um teste, abra o PR, veja o ❌, ache a linha, desfaça e veja o ✅ (@sec-s3-actions);
+5. ative o **ruleset** de proteção da `main` (@sec-s3-regras) e confirme que um `push` direto é recusado;
+6. resolva o issue por um ramo `fix/...` e um PR com `Closes #1` no corpo, juntando por **squash**; confira que o issue fechou sozinho;
+7. do segundo computador (ou de uma segunda pasta: `git clone` do mesmo endereço em outro lugar), faça uma mudança, `push`, e traga no primeiro com `pull`. Se o conflito não vier sozinho, provoque um e resolva.
+
+Registre no Notion o *Nível atual* e a primeira coisa que o GitHub mostrou diferente do que este capítulo descreve (isso alimenta a revisão do capítulo, @sec-ciclo).
+
+## Autoavaliação {#sec-s3-autoavaliacao}
+
+| Nível | Você consegue... |
+|:--|:--|
+| **1 · Reconheço** | Dizer o que é ramo, merge, PR, issue, workflow e *check*; ler `git log --graph`; reconhecer as marcas de conflito. |
+| **2 · Explico** | Explicar por que o `push` foi recusado e por que `--force` é perigoso; as diferenças entre merge, squash e rebase; por que `3.10` precisa de aspas no YAML; para que serve `permissions`. |
+| **3 · Executo** | Abrir issue, ramo, PR com testes verdes e juntá-lo; resolver um conflito; proteger a `main`; achar um commit com `bisect`. |
+| **4 · Ensino** | Montar uma oficina de 40 min em que duas pessoas editam o mesmo arquivo, provocam e resolvem um conflito e veem o PR ficar vermelho e verde. |
+
+## Para ir além {#sec-s3-alem}
+
+* **`pre-commit`:** roda verificações (formatação, testes rápidos) antes de cada commit, no seu computador. Complementa o Actions, que roda depois.
+* **CODEOWNERS e revisão:** quando houver mais pessoas, o arquivo `.github/CODEOWNERS` define quem revisa cada pasta.
+* **Codespaces e github.dev:** ambientes de desenvolvimento no navegador; úteis para corrigir algo rápido ou ensinar sem instalação.
+* **GitHub Desktop e painel Git do VS Code:** mostram diff, ramos e conflitos com botões; entender os comandos primeiro torna qualquer interface mais fácil.
+* **Documentação oficial:** *GitHub Docs* (docs.github.com), seções *Actions*, *Pull requests* e *Rulesets*; e o livro gratuito *Pro Git* (git-scm.com/book).

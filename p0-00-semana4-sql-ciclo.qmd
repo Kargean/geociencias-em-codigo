@@ -1,0 +1,661 @@
+# Semana 4 · SQL e o ciclo completo {#sec-p000-s4}
+
+::: {.callout-note icon=false}
+## Neste capítulo
+
+**Pergunta que guia tudo:** como guardar os dados de um jeito que o próprio banco recuse o que é impossível, e como manter o projeto inteiro (código, dados, testes, texto) corrigível e atualizável para sempre?
+
+**Você vai ser capaz de:**
+
+1. explicar o que é um banco relacional e **modelar** duas tabelas ligadas (chave primária, chave estrangeira, `CHECK`, índice);
+2. **criar e carregar** um banco SQLite a partir dos dados limpos da Semana 2;
+3. escrever consultas em degraus: `SELECT`, `WHERE`, `GROUP BY`, `JOIN`, `WITH`, **janelas**;
+4. entender o `NULL` (que não é zero) e quatro armadilhas clássicas: `= NULL`, `CHECK` com `NULL`, tipos que o SQLite não impõe e janela por linhas em vez de por datas;
+5. **nunca** montar SQL juntando texto: usar parâmetros;
+6. provar, com um teste, que **Python e SQL dão o mesmo resultado**;
+7. fechar o ciclo: registrar mudanças no `CHANGELOG.md`, publicar a versão `v0.1.0` e manter o material **vivo** com um ritual curto de revisão.
+
+**Pré-requisitos:** Semanas 2 e 3.
+
+**Tempo sugerido:** 3 h, em duas sessões: (1) até a @sec-s4-null, no capítulo e no seu computador; (2) da @sec-s4-janelas até o fim.
+:::
+
+## Por que um banco de dados? {#sec-s4-por-que}
+
+O CSV serve para guardar e trocar dados. Mas ele **não impede** nada: aceita `-999`, data escrita de três jeitos, estação que não existe. Um banco de dados relacional acrescenta:
+
+* **tipos e regras** que o próprio banco confere antes de aceitar uma linha (no SQLite, com uma ressalva importante sobre tipos: veja a Armadilha 3);
+* **ligações entre tabelas** (cada medida aponta para uma estação), sem repetir o nome e a coordenada da estação em milhares de linhas;
+* **consultas** em uma linguagem declarativa, o **SQL**: você descreve *o que* quer, e o banco decide *como* buscar;
+* **desempenho** com índices, quando os dados crescem.
+
+Usamos o **SQLite**: um banco inteiro dentro de **um arquivo**, sem servidor para instalar, que já vem com o Python (módulo `sqlite3`). É o banco mais usado do mundo em aplicativos e serve muito bem a estudos e projetos individuais. Bancos de servidor (PostgreSQL com PostGIS, no P3) usam um SQL **muito parecido**, com mais recursos; os dialetos diferem em detalhes (por exemplo, as funções de data, como `strftime` e `julianday`, são do SQLite).
+
+Primeiro, a versão que você tem. As janelas deste capítulo precisam de SQLite 3.28 ou mais novo:
+
+```{python}
+import sqlite3
+import sys
+
+sys.path.insert(0, "projeto_chuva")
+from chuva import banco
+from chuva import qualidade as q
+from chuva import resumo as r
+from chuva.cli import formatar_tabela
+
+print("SQLite", sqlite3.sqlite_version, "| suficiente:", banco.versao_sqlite_suficiente())
+```
+
+## Modelar: duas tabelas {#sec-s4-modelo}
+
+Modelar é decidir **quais tabelas** existem e **como se ligam**. O nosso problema tem duas coisas: **estações** (poucas, com nome, coordenadas, bacia) e **medidas diárias** (muitas, uma por estação por dia). Cada medida pertence a **uma** estação; uma estação tem **muitas** medidas (relação *um para muitos*). O esquema, lido direto do arquivo do projeto:
+
+```{python}
+#| echo: false
+from pathlib import Path
+
+print(Path("projeto_chuva/sql/esquema.sql").read_text(encoding="utf-8"))
+```
+
+Leia os pedaços:
+
+| Trecho | O que significa |
+|:--|:--|
+| `PRIMARY KEY` | identifica a linha. Em `chuva_diaria` é **composta**: (`estacao_id`, `data`); só pode haver **uma** medida por estação por dia |
+| `REFERENCES estacao (id)` | **chave estrangeira**: o `estacao_id` precisa existir em `estacao` |
+| `NOT NULL` | a coluna não pode ficar vazia |
+| `CHECK (...)` | regra que o dado precisa cumprir (latitude entre -90 e 90, chuva não negativa, data válida) |
+| `chuva_mm REAL` sem `NOT NULL` | `NULL` é **permitido** de propósito: significa "não houve medida válida" |
+| `typeof(coluna) IN ('real', 'integer')` | exige que o valor guardado seja **número**; sem isso o SQLite aceitaria texto numa coluna `REAL` (Armadilha 3) |
+| `CREATE INDEX` | atalho de busca por data (veja a @sec-s4-plano) |
+
+Duas escolhas que valem comentário. As **datas** são `TEXT` no formato `AAAA-MM-DD` (ISO 8601): o SQLite não tem tipo data próprio, e esse formato tem a vantagem de ordenar *alfabeticamente* na ordem do calendário. E a **ausência** é `NULL`, nunca `-999`: a mesma decisão da Semana 2, agora garantida no banco.
+
+## Criar e carregar {#sec-s4-carregar}
+
+Os registros limpos da Semana 2 viram linhas de banco. O atalho `construir_banco` conecta, cria o esquema e carrega as duas tabelas. Aqui o banco fica **na memória** (`:memory:`) e some ao fechar:
+
+```{python}
+registros, relatorio = q.ler_chuva("projeto_chuva/dados/chuva_diaria.csv")
+con = banco.construir_banco("projeto_chuva/dados/estacoes.csv", registros)
+
+
+def consulta(conexao, sql, **parametros):
+    """Roda um SELECT, imprime o resultado como tabela e devolve as linhas (como tuplas)."""
+    cursor = conexao.execute(sql, parametros)
+    colunas = [d[0] for d in cursor.description]
+    linhas = [tuple(l) for l in cursor.fetchall()]
+    print(formatar_tabela(colunas, linhas))
+    return linhas
+
+
+_ = consulta(con, "SELECT * FROM estacao")
+```
+
+Para guardar em arquivo e abrir depois em outra ferramenta: `python -m chuva banco --saida chuva.db` (a pasta já ignora `*.db` no Git, porque o banco se refaz a partir do CSV). Para explorar o arquivo, serve o programa gratuito *DB Browser for SQLite*, uma extensão de visualização do VS Code ou o comando `sqlite3 chuva.db`, se estiver instalado.
+
+Como o banco já tem as linhas, confira a contagem. Repare na diferença entre `COUNT(*)` (conta linhas) e `COUNT(coluna)` (conta as linhas em que a coluna **não é** `NULL`):
+
+```{python}
+linhas_banco = consulta(con, "SELECT COUNT(*) AS linhas, COUNT(chuva_mm) AS validos, COUNT(*) - COUNT(chuva_mm) AS ausentes FROM chuva_diaria")
+```
+
+São as 2 920 linhas do relatório de qualidade da Semana 2, 11 delas sem medida. O que se perdeu no caminho? Nada: a limpeza deu `None`, que virou `NULL`.
+
+## O banco recusa o que é impossível {#sec-s4-restricoes}
+
+Uma regra no esquema vale para **todo** programa que escrever no banco, não só para o seu código Python. Vamos tentar inserir dados ruins num banco novo e ver o que acontece. A função `tentar` mostra se a linha entrou ou foi recusada:
+
+```{python}
+def tentar(conexao, sql, parametros=()):
+    try:
+        conexao.execute(sql, parametros)
+        print(f"ENTROU    {parametros}")
+    except sqlite3.Error as erro:
+        print(f"RECUSADO  {parametros} -> {type(erro).__name__}: {erro}")
+
+
+teste = banco.conectar()
+banco.criar_esquema(teste)
+teste.execute("INSERT INTO estacao VALUES ('A', 'Teste', -21.0, -41.0, 10.0, 'Bacia X')")
+inserir = "INSERT INTO chuva_diaria VALUES (?, ?, ?)"
+
+tentar(teste, inserir, ("A", "2024-01-01", 12.4))        # dado normal
+tentar(teste, inserir, ("A", "2024-01-02", None))        # NULL é permitido: sem medida válida
+tentar(teste, inserir, ("A", "2024-01-01", 99.0))        # mesma estação, mesmo dia
+tentar(teste, inserir, ("A", "2024-01-03", -5.0))        # chuva negativa
+tentar(teste, inserir, ("A", "2024-02-30", 1.0))         # 30 de fevereiro
+tentar(teste, inserir, ("A", "ontem", 1.0))              # data que não é data
+tentar(teste, inserir, ("Z", "2024-01-04", 1.0))         # estação que não existe
+```
+
+Cada recusa tem uma causa diferente: `UNIQUE constraint failed` (chave primária repetida), `CHECK constraint failed` (regra de valor, três vezes: chuva negativa e duas datas inválidas) e `FOREIGN KEY constraint failed` (estação inexistente). A mensagem do `CHECK` mostra a **expressão** que falhou, o que ajuda a achar a regra.
+
+### Armadilha 1: a chave estrangeira vem desligada
+
+Esta última recusa só aconteceu porque a função `banco.conectar()` do projeto executa `PRAGMA foreign_keys = ON`. No SQLite, a verificação de chave estrangeira vem **desligada por padrão em cada conexão nova**. Veja o que acontece numa conexão "crua":
+
+```{python}
+crua = sqlite3.connect(":memory:")
+print("foreign_keys =", crua.execute("PRAGMA foreign_keys").fetchone()[0])
+crua.executescript(Path("projeto_chuva/sql/esquema.sql").read_text(encoding="utf-8"))
+tentar(crua, inserir, ("Z", "2024-01-04", 1.0))          # a mesma estação inexistente
+crua.close()
+```
+
+Entrou, e não devia. Sem o `PRAGMA`, o `REFERENCES` é só decoração. Por isso o projeto tem uma função `conectar` e um teste que fixa esse comportamento.
+
+### Armadilha 2: `CHECK` e `NULL` (um erro que apareceu de verdade)
+
+A primeira versão da regra de data deste módulo era `CHECK (date(data) = data)`. Parecia certa, e os testes com datas como `2024-02-30` passavam. Mas ela deixava passar `'ontem'`. Por quê? `date('ontem')` é `NULL`, e `NULL = 'ontem'` é... `NULL` (nem verdadeiro, nem falso). E um `CHECK` só **reprova** quando a expressão dá **falso**: se der `NULL`, o dado entra. A correção foi trocar `=` por `IS`, que nunca devolve `NULL`. Os dois lado a lado:
+
+```{python}
+exemplo = sqlite3.connect(":memory:")
+exemplo.execute("CREATE TABLE errada (d TEXT CHECK (date(d) = d))")
+exemplo.execute("CREATE TABLE certa  (d TEXT CHECK (date(d) IS d))")
+for tabela in ("errada", "certa"):
+    print(tabela.upper())
+    tentar(exemplo, f"INSERT INTO {tabela} VALUES (?)", ("ontem",))
+    tentar(exemplo, f"INSERT INTO {tabela} VALUES (?)", ("2024-02-30",))
+print("date('2024-02-30') =", exemplo.execute("SELECT date('2024-02-30')").fetchone()[0])
+exemplo.close()
+```
+
+Duas lições no mesmo exemplo. A primeira: na tabela `errada`, `'ontem'` **entrou**; na `certa`, foi recusado. A segunda: o SQLite *normaliza* `2024-02-30` para `2024-03-01`, que é diferente do texto original; por isso as duas versões da regra recusam essa data. A conclusão geral: **toda regra com `NULL` no meio precisa de teste que tente o dado ruim**. É o que o arquivo `tests/test_banco.py` faz (`test_datas_invalidas`).
+
+### Armadilha 3: os tipos do SQLite são sugestões
+
+Uma coluna declarada `REAL` parece garantir que só entram números. No SQLite, **não garante**. O tipo declarado vira uma *afinidade*: o SQLite *tenta* converter (`'12.4'` vira `12.4`), mas, se não consegue, guarda o valor **como veio**, texto inclusive. E um texto ainda por cima passa em `CHECK (mm >= 0)`, porque na ordenação do SQLite todo texto é **maior** que qualquer número. Comparando uma tabela sem proteção e uma com `typeof`:
+
+```{python}
+tipos = sqlite3.connect(":memory:")
+tipos.execute("CREATE TABLE sem_guarda (mm REAL CHECK (mm IS NULL OR mm >= 0))")
+tipos.execute("CREATE TABLE com_guarda (mm REAL CHECK (mm IS NULL OR (typeof(mm) IN ('real', 'integer') AND mm >= 0)))")
+for tabela in ("sem_guarda", "com_guarda"):
+    print(tabela.upper())
+    tentar(tipos, f"INSERT INTO {tabela} VALUES (?)", ("abc",))
+    tentar(tipos, f"INSERT INTO {tabela} VALUES (?)", ("12.4",))
+print("guardado em sem_guarda:", tipos.execute("SELECT mm, typeof(mm) FROM sem_guarda").fetchall())
+print("'abc' >= 0 ->", tipos.execute("SELECT 'abc' >= 0").fetchone()[0])
+print("AVG, COUNT com o texto no meio ->", tipos.execute("SELECT AVG(mm), COUNT(mm) FROM sem_guarda").fetchone())
+tipos.close()
+```
+
+Na tabela sem proteção, `'abc'` **entrou** e ficou guardado como texto (e a média da coluna, com o texto no meio, vira 6,2: o `AVG` trata o texto como zero e o conta, **sem aviso nenhum**; o certo seria 12,4). `'12.4'` entrou nas duas, mas como o **número** 12,4. É por isso que o `esquema.sql` do projeto escreve `typeof(...) IN ('real', 'integer')` em toda coluna numérica. A alternativa moderna são as tabelas `STRICT` (SQLite 3.37 ou mais novo), que recusam texto em coluna `REAL` sozinhas; o projeto não as usa para funcionar também em versões mais antigas. Outros bancos (PostgreSQL, por exemplo) impõem o tipo declarado, e o SQLite é a exceção que merece esse cuidado.
+
+## A escada do SELECT {#sec-s4-select}
+
+Uma consulta SQL tem sempre a mesma estrutura. Você sobe um degrau de cada vez, e cada degrau acrescenta uma ideia.
+
+**Degrau 1: escolher colunas e linhas.** `SELECT` (quais colunas), `FROM` (de qual tabela), `WHERE` (quais linhas), `ORDER BY` (em que ordem), `LIMIT` (quantas):
+
+```{python}
+_ = consulta(con, "SELECT * FROM chuva_diaria WHERE estacao_id = 'E01' ORDER BY data LIMIT 5")
+```
+
+**Degrau 2: resumir com `GROUP BY`.** Junta as linhas por grupo e calcula um número por grupo (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`). `AS` dá nome ao resultado:
+
+```{python}
+_ = consulta(con, """
+SELECT estacao_id,
+       COUNT(chuva_mm)         AS validos,
+       ROUND(AVG(chuva_mm), 2) AS media_mm_dia,
+       MAX(chuva_mm)           AS maior_mm
+FROM chuva_diaria
+GROUP BY estacao_id
+ORDER BY estacao_id
+""")
+```
+
+**Degrau 3: juntar tabelas com `JOIN`.** Traz para cada medida os dados da estação à qual ela pertence. Aqui, quantas linhas há por bacia:
+
+```{python}
+_ = consulta(con, """
+SELECT e.bacia, COUNT(*) AS linhas
+FROM chuva_diaria AS c
+JOIN estacao AS e ON e.id = c.estacao_id
+GROUP BY e.bacia
+ORDER BY e.bacia
+""")
+```
+
+**Degrau 4: etapas com `WITH`** (*common table expression*): dá nome a um resultado intermediário e o usa depois, como se fosse uma tabela. Fica mais legível que consultas dentro de consultas. A consulta `03` do projeto calcula, primeiro, o total de cada estação em cada ano e, depois, a média desses totais por bacia (só entram estação-anos com pelo menos 300 dias válidos):
+
+```{python}
+consulta_03 = Path("projeto_chuva/sql/consultas/03_chuva_por_bacia.sql").read_text(encoding="utf-8")
+_ = consulta(con, consulta_03)
+```
+
+Somar chuva de estações diferentes não tem sentido físico (o que significaria "o total da bacia"?); a média dos totais por estação, sim. Por isso a consulta faz as duas etapas.
+
+**Degrau 5: o resumo que junta tudo.** A consulta `01` usa `JOIN`, `GROUP BY`, `COUNT(*)` contra `COUNT(coluna)`, `MIN` e `MAX`:
+
+```{python}
+consulta_01 = Path("projeto_chuva/sql/consultas/01_resumo_estacoes.sql").read_text(encoding="utf-8")
+_ = consulta(con, consulta_01)
+```
+
+Esta saída confere com a da Semana 2: E01 tem 730 linhas (falta o dia `2025-02-10`), 724 válidas e 6 ausentes; E04 tem 728 linhas (faltam três dias de agosto de 2024) e nenhuma ausente. As consultas completas do projeto estão em `projeto_chuva/sql/consultas/` e cada uma tem um comentário no topo explicando a ideia.
+
+## NULL: o valor que não é zero {#sec-s4-null}
+
+`NULL` quer dizer "não sei". Por isso ele não se comporta como número. As regras que mais pegam gente, mostradas com uma tabela minúscula de quatro dias (um deles sem medida):
+
+```{python}
+mini = sqlite3.connect(":memory:")
+mini.execute("CREATE TABLE m (dia INTEGER, mm REAL)")
+mini.executemany("INSERT INTO m VALUES (?, ?)", [(1, 10.0), (2, None), (3, 0.0), (4, 20.0)])
+
+_ = consulta(mini, """
+SELECT COUNT(*)                 AS linhas,
+       COUNT(mm)                AS validos,
+       SUM(mm)                  AS soma,
+       AVG(mm)                  AS media,
+       AVG(COALESCE(mm, 0))     AS media_errada
+FROM m
+""")
+```
+
+* `COUNT(*)` conta 4 linhas, `COUNT(mm)` conta só 3: o `NULL` fica de fora.
+* `SUM` e `AVG` **ignoram** o `NULL`: a média certa é 30 / 3 = 10,0.
+* `COALESCE(mm, 0)` troca `NULL` por zero, e a média cai para 7,5. Isso é a mesma mentira de tratar ausente como zero ("não choveu" quando a verdade é "não sabemos"). `COALESCE` é útil para *exibir*, e perigoso para *calcular*.
+
+E o pior de todos: **comparar com `NULL` nunca dá verdadeiro**.
+
+```{python}
+print("WHERE chuva_mm = NULL  ->", con.execute("SELECT COUNT(*) FROM chuva_diaria WHERE chuva_mm = NULL").fetchone()[0], "linhas")
+print("WHERE chuva_mm IS NULL ->", con.execute("SELECT COUNT(*) FROM chuva_diaria WHERE chuva_mm IS NULL").fetchone()[0], "linhas")
+```
+
+`= NULL` devolve zero linhas, **sem erro nenhum**: o banco responde com serenidade a uma pergunta que não faz sentido. Para perguntar por ausentes, use `IS NULL` / `IS NOT NULL`. Uma consequência: dividir as linhas em `WHERE mm > 3` e `WHERE mm <= 3` **não** cobre todas; as linhas `NULL` caem fora das duas (Exercício 2).
+
+## Janelas: contas que olham os vizinhos {#sec-s4-janelas}
+
+Com `GROUP BY`, cada grupo vira **uma** linha. Uma **função de janela** (`OVER`) calcula algo olhando para as linhas vizinhas **sem juntar as linhas**: cada linha continua lá, com uma coluna a mais. Exemplos clássicos são o total acumulado e a soma dos últimos N dias.
+
+Total acumulado de janeiro de 2025 na estação E03 (as três últimas linhas):
+
+```{python}
+_ = consulta(con, """
+SELECT * FROM (
+    SELECT data, chuva_mm, ROUND(SUM(chuva_mm) OVER (ORDER BY data), 1) AS acumulado_mm
+    FROM chuva_diaria
+    WHERE estacao_id = 'E03' AND data BETWEEN '2025-01-01' AND '2025-01-31'
+)
+ORDER BY data DESC
+LIMIT 3
+""")
+```
+
+O último valor acumulado é o total do mês. Confira que bate com a consulta mensal (`02_total_mensal`) do projeto:
+
+```{python}
+mensal_e03 = [tuple(l) for l in banco.executar_consulta(con, "02_total_mensal") if l["estacao"] == "E03" and l["mes"] == "2025-01"]
+print(mensal_e03)
+```
+
+### Armadilha 4: janela por linhas, não por datas
+
+O `Rx5day` (maior chuva acumulada em 5 dias consecutivos) pede uma janela de **cinco dias de calendário**. O jeito intuitivo, `ROWS BETWEEN 4 PRECEDING AND CURRENT ROW`, pega a linha atual e as **quatro linhas anteriores** (cinco linhas). Se faltar uma data na tabela, elas não são cinco dias seguidos! O jeito certo é `RANGE` sobre o número da data (`julianday`). Um exemplo mínimo: cinco linhas de 10 mm cada, mas o dia 4 não tem linha.
+
+```{python}
+janela = sqlite3.connect(":memory:")
+janela.execute("CREATE TABLE d (data TEXT, mm REAL)")
+janela.executemany("INSERT INTO d VALUES (?, ?)", [(f"2024-01-{dia:02d}", 10.0) for dia in (1, 2, 3, 5, 6)])  # falta o dia 4
+
+_ = consulta(janela, """
+SELECT data, mm,
+       SUM(mm) OVER (ORDER BY data ROWS  BETWEEN 4 PRECEDING AND CURRENT ROW)                  AS por_linhas,
+       SUM(mm) OVER (ORDER BY julianday(data) RANGE BETWEEN 4 PRECEDING AND CURRENT ROW)       AS por_datas
+FROM d
+ORDER BY data
+""")
+```
+
+No dia 6, `por_linhas` soma cinco linhas (50 mm), mas aquelas cinco linhas cobrem **seis dias** (1 a 6, com buraco). Já `por_datas` soma só os dias de 2 a 6 que existem (40 mm). Para o `Rx5day`, o valor certo é o segundo. No projeto real, a consulta `06_maximo_5_dias` usa `RANGE`, só considera janelas **completas** (as cinco datas existem, sem `NULL`) e tem teste para o caso do buraco.
+
+### Lacunas e ilhas: sequências de dias seguidos
+
+Como achar o **maior período seco** (dias seguidos com chuva menor que 1 mm) só com SQL? A técnica se chama *lacunas e ilhas*:
+
+1. filtre só os dias secos;
+2. numere as linhas em ordem (`ROW_NUMBER()`);
+3. subtraia o número da linha da data (em número juliano). Dentro de uma sequência de dias seguidos, a diferença é **constante**; quando há um buraco, ela **muda**. Essa constante identifica a "ilha".
+
+A conta de cabeça com sete dias (`s` = seco, `.` = chuvoso): em `s s s . s s s`, os secos são os dias 1, 2, 3, 5, 6, 7 e as linhas numeradas são 1 a 6. Data menos número: 0, 0, 0, 1, 1, 1. Duas ilhas, de três dias cada. A consulta `05_maior_periodo_seco` faz isso para os dados reais, e o Python da Semana 2 (`maior_periodo_seco`) faz o mesmo de outro jeito. Os dois resultados:
+
+```{python}
+sql_cdd = {l["estacao"]: (l["dias"], l["inicio"]) for l in banco.executar_consulta(con, "05_maior_periodo_seco", limiar=1.0)}
+py_cdd = {est: r.maior_periodo_seco(r.serie(registros, est)) for est in r.estacoes_em(registros)}
+for est in sorted(sql_cdd):
+    print(est, "SQL:", sql_cdd[est], "| Python:", (py_cdd[est][0], py_cdd[est][1].isoformat()))
+```
+
+## Parâmetros: nunca monte SQL juntando texto {#sec-s4-parametros}
+
+Montar uma consulta colando texto (`f"... WHERE nome = '{nome}'"`) é um erro grave. Se `nome` vier de uma pessoa, ela pode escrever SQL dentro dele. É a **injeção de SQL**, uma das falhas de segurança mais antigas e mais comuns. Veja, com um texto que **parece** um nome, mas muda a consulta:
+
+```{python}
+nome_malicioso = "x' OR '1'='1"
+
+por_texto = con.execute(f"SELECT id FROM estacao WHERE nome = '{nome_malicioso}'").fetchall()
+por_parametro = con.execute("SELECT id FROM estacao WHERE nome = ?", (nome_malicioso,)).fetchall()
+
+print("colando texto: ", [l[0] for l in por_texto])
+print("com parâmetro: ", [l[0] for l in por_parametro])
+```
+
+Com o texto colado, a condição vira `nome = 'x' OR '1'='1'`, que é **sempre verdadeira**: todas as estações voltam (imagine isso numa tela de login). Com o parâmetro `?`, o banco trata o texto inteiro como **valor**, nunca como código, e não acha nenhuma estação com aquele nome. O mesmo vale para `:nome` (parâmetros nomeados, que as consultas do projeto usam, como `:limiar`). Regra: **valores entram por parâmetro; só nomes de tabela e coluna, escritos por você, podem ser colados no texto**.
+
+## Python contra SQL: o teste que une os dois {#sec-s4-consistencia}
+
+Escrevemos os mesmos índices duas vezes, de jeitos bem diferentes: Python puro (Semana 2) e SQL (esta semana). Se um deles errar, **os dois deixam de concordar**. O teste mais importante do módulo faz essa comparação para todas as estações. Este é um dos testes, tal como está no arquivo:
+
+```{python}
+#| echo: false
+import importlib.util
+import inspect
+
+caminho_teste = Path("projeto_chuva/tests/test_consistencia.py")
+spec = importlib.util.spec_from_file_location("test_consistencia", caminho_teste)
+modulo_teste = importlib.util.module_from_spec(spec)
+sys.modules["test_consistencia"] = modulo_teste
+spec.loader.exec_module(modulo_teste)
+print(inspect.getsource(modulo_teste.PythonContraSQL.test_maximo_acumulado_5_dias))
+```
+
+E os números que ele compara, lado a lado, para o `Rx5day`:
+
+```{python}
+sql_rx5 = {l["estacao"]: (l["acumulado_mm"], l["fim"]) for l in banco.executar_consulta(con, "06_maximo_5_dias")}
+py_rx5 = {est: r.maximo_acumulado(r.serie(registros, est), janela=5) for est in r.estacoes_em(registros)}
+for est in sorted(sql_rx5):
+    print(est, "SQL:", sql_rx5[est], "| Python:", (py_rx5[est][0], py_rx5[est][1].isoformat()))
+    assert sql_rx5[est] == (py_rx5[est][0], py_rx5[est][1].isoformat())
+```
+
+O E01 teve 207,7 mm em cinco dias, terminando em 10/12/2024 (a chuva de 90 mm de 9/12 está dentro dessa janela); o E03, 194,3 mm até 16/01/2025.
+
+### Mutação em SQL: o teste que você acha que tem
+
+Na Semana 2 você plantou defeitos no Python para ver se os testes os pegavam. Fizemos o mesmo com o SQL, e **dois defeitos passaram despercebidos** nos testes com os dados reais:
+
+* trocar `RANGE` por `ROWS` na consulta `06` (o buraco de datas só existe em alguns pontos dos dados, e nenhum deles muda o máximo de uma estação);
+* trocar `chuva_mm < :limiar` por `chuva_mm <= :limiar` na `05` (o maior período seco de nenhuma das quatro estações depende de um dia com exatamente 1,0 mm).
+
+A correção foi **escrever casos pequenos de propósito**: o buraco de datas, o limiar exato, o mês só com `NULL` (a classe `ConsultasEmCasosPequenos` em `tests/test_consistencia.py`). Depois disso, todas as mutações que testamos (em Python e em SQL) passaram a ser pegas. A lição vale para todo o livro: **dados reais não exercitam os casos de borda**. Monte o caso pequeno que exercita.
+
+## Plano de consulta e índice {#sec-s4-plano}
+
+Como o banco acha as linhas? `EXPLAIN QUERY PLAN` conta. Três consultas, três estratégias:
+
+```{python}
+def plano(sql):
+    for linha in con.execute("EXPLAIN QUERY PLAN " + sql):
+        print("  ", linha[-1])
+
+
+print("Filtro por data (existe índice por data):")
+plano("SELECT * FROM chuva_diaria WHERE data >= '2025-01-01' AND data < '2025-02-01'")
+print("Filtro por estação e data (chave primária):")
+plano("SELECT * FROM chuva_diaria WHERE estacao_id = 'E01' AND data = '2025-01-05'")
+print("Filtro por valor de chuva (sem índice):")
+plano("SELECT * FROM chuva_diaria WHERE chuva_mm > 100")
+```
+
+`SEARCH ... USING INDEX` significa que o banco foi direto às linhas certas; `SCAN` significa que ele leu a tabela **inteira**. Com 2 920 linhas, tanto faz. Com 30 milhões de linhas (uma rede de estações por décadas, ou pixels de imagem), a diferença é de segundos (a leitura inteira) contra milissegundos (a busca pelo índice), e repetida milhares de vezes vira a diferença entre minutos e horas. O texto exato do plano muda entre versões do SQLite, mas as palavras `SEARCH` e `SCAN` continuam. Regra prática: crie índice nas colunas que mais aparecem em `WHERE` e `JOIN`, mas não em todas (cada índice ocupa espaço e atrasa as inserções).
+
+## Fechando o ciclo {#sec-ciclo}
+
+Este capítulo e os três anteriores formam um ciclo completo: **ideia → issue → ramo → teste → código → pull request → testes automáticos → merge → registro → versão**. Falta o último elo, o que mantém o material vivo: o ritual de **retroalimentação**. Sem ele, o projeto envelhece em silêncio.
+
+### Erros reais que apareceram ao construir este módulo
+
+Cada um virou um teste, uma regra ou um aviso. Eles são o argumento mais forte a favor do ciclo:
+
+| O que deu errado | Como foi achado | O que ficou |
+|:--|:--|:--|
+| `CHECK (date(data) = data)` aceitava `'ontem'` | teste que tenta datas ruins | `IS` no esquema e `test_datas_invalidas` |
+| duas mutações em SQL passavam despercebidas | teste de mutação | `ConsultasEmCasosPequenos` |
+| `bisect` apontava o commit errado | exercício com verdade conhecida | `python -B` e o aviso no capítulo da Semana 3 |
+| `description: ... (ex.: ...)` quebrava o YAML | validação do arquivo | aviso nos erros clássicos da Semana 3 |
+| laboratório sem identidade de Git nos gabaritos | execução dos gabaritos | `Laboratorio(identidade=True)` |
+| a figura do fluxo tinha setas sobre o texto | olhar a imagem gerada | ajuste de geometria |
+
+### O ritual de 15 minutos por semana
+
+1. **Capturar (no momento, 1 minuto).** Algo travou, confundiu ou está errado? Abra um issue com o formulário certo: `erro-no-livro` ou `melhoria`. Não conserte agora; registre e volte ao que fazia.
+2. **Triar (1 vez por semana, 5 minutos).** Leia os issues abertos (`gh issue list --label melhoria`), escolha **no máximo três** e coloque num *milestone* (por exemplo, `v0.2.0`).
+3. **Corrigir com teste primeiro (o tempo que precisar).** Para um erro, escreva antes o **teste que falha** (vermelho); depois conserte (verde). Ramo `fix/...`, commits pequenos, PR com `Closes #N`.
+4. **Deixar o GitHub conferir.** Os testes automáticos rodam no PR; só entra com tudo verde, por **squash**.
+5. **Registrar (3 minutos).** Uma linha no `CHANGELOG.md`, na seção *Não lançado*. Se uma **regra** mudou, atualize também o `CLAUDE.md` no mesmo PR. No Notion, mude o *Status*/*Nível atual* do módulo e cole o link do issue.
+6. **Lançar quando acumular (a cada algumas semanas).** Veja abaixo.
+
+A cada **três meses**, uma revisão maior (30 minutos): versões do Python, do SQLite e das ações do Actions (o Dependabot ajuda); links quebrados; passos de clique do GitHub que mudaram; e a lista **"O que ainda não foi verificado"** do `CLAUDE.md`, que deve **encolher** a cada revisão.
+
+### O histórico de mudanças
+
+O arquivo `CHANGELOG.md` conta ao leitor o que mudou em cada versão. Segue o formato *Keep a Changelog* (seções *Adicionado*, *Alterado*, *Obsoleto*, *Removido*, *Corrigido* e *Segurança*) e as versões seguem o *versionamento semântico*: `MAIOR.MENOR.CORREÇÃO`. Enquanto o livro está em construção, a versão começa com `0.`, que sinaliza "pode mudar sem aviso". Assim está o início do arquivo do projeto:
+
+```{python}
+#| echo: false
+print("\n".join(Path("CHANGELOG.md").read_text(encoding="utf-8").splitlines()[:14]))
+```
+
+### Lançar a v0.1.0
+
+Quando o conjunto está bom, você transforma o estado atual numa **versão** com nome. Os passos, no repositório de treino:
+
+1. `git switch main && git pull`, e confira que os testes estão verdes;
+2. **por pull request** (a `main` está protegida desde a Semana 3), no `CHANGELOG.md`: troque o título *Não lançado* por `[0.1.0] - AAAA-MM-DD` e abra uma nova seção *Não lançado* acima. Junte o PR depois que os testes ficarem verdes;
+3. volte para a `main` **atualizada** (`git switch main && git pull`, para trazer o commit do `CHANGELOG`) e crie a tag anotada sobre esse commit; depois envie-a:
+
+```bash
+git tag -a v0.1.0 -m "Primeira versão: limpeza, índices, SQL e testes"
+git push origin v0.1.0
+```
+
+4. crie a **release** no GitHub, que publica a tag com um texto de notas (e anexa o código compactado automaticamente):
+
+```bash
+gh release create v0.1.0 --title "v0.1.0" --notes-file notas-v0.1.0.md
+# ou, para o GitHub montar as notas a partir dos PRs juntados:
+gh release create v0.1.0 --title "v0.1.0" --generate-notes
+```
+
+### O CLAUDE.md: a memória do projeto
+
+Uma sessão de trabalho com o Claude começa sem lembrar da anterior. O arquivo `CLAUDE.md`, na raiz do repositório, é a **memória**: quem é você, qual o objetivo, onde fica cada coisa, as regras do método, como rodar os testes e o que ainda não foi verificado. Ao começar uma sessão, a primeira instrução é "leia o `CLAUDE.md`, o `CHANGELOG.md` e os issues abertos". Ao terminar, quem mexeu atualiza o que mudou. O mesmo vale para você daqui a seis meses: o arquivo é a melhor carta que você pode deixar para si.
+
+### Ligar o GitHub ao Notion, sem automação
+
+O Notion guarda **o seu estudo** (módulos, níveis, datas); o GitHub guarda **o trabalho** (código, texto, histórico). A ligação mais simples e que não quebra: cole no módulo do Notion o link do issue ou do PR relevante, e mude o *Status* quando o PR for juntado. Integrações automáticas existem, mas só valem a pena depois que o processo manual estiver estável.
+
+## Erros clássicos {#sec-s4-erros}
+
+1. **`WHERE coluna = NULL`.** Sempre zero linhas, sem erro. Use `IS NULL`.
+2. **Tratar ausente como zero** (`COALESCE(mm, 0)` dentro de uma média). Mente sobre o que se sabe.
+3. **`PRAGMA foreign_keys = ON` esquecido.** A chave estrangeira não protege nada.
+   Parente próximo: **acreditar no tipo declarado** (`REAL`). O SQLite guarda o texto `'abc'` nessa coluna se você não exigir `typeof`.
+4. **`CHECK` com `NULL`.** Reprova só quando dá falso; use `IS` quando a expressão puder ser `NULL`.
+5. **Janela `ROWS` onde se queria dias.** Falta uma data e o número de dias deixa de ser o que parece.
+6. **Montar SQL com texto colado** (injeção).
+7. **Somar chuva de estações diferentes.** Não tem sentido físico; tire a média dos totais por estação (a consulta `03` do projeto faz assim).
+8. **Calcular um índice só uma vez.** Sem uma segunda conta independente (Python contra SQL), você não sabe se está certo.
+9. **Confiar só nos dados reais para testar.** Eles raramente exercitam os casos de borda; monte o caso pequeno.
+10. **Abrir um release sem tag, ou sem atualizar o `CHANGELOG`.** A versão não diz o que mudou.
+
+## Exercícios {#sec-s4-exercicios}
+
+**Exercício 1 (os cinco números de novo, em SQL).** Na Semana 2 você descobriu cinco números com Python. Descubra os mesmos **em SQL** e prove que dão igual: (a) dias com medida válida de E02; (b) dias de E03 acima de 50 mm; (c) o mês **completo** mais chuvoso de E03 e o total; (d) quantos pares estação-mês estão incompletos; (e) a maior chuva de um dia em E01 e a data.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 1
+```python
+a = con.execute("SELECT COUNT(chuva_mm) FROM chuva_diaria WHERE estacao_id = 'E02'").fetchone()[0]
+b = con.execute("SELECT COUNT(*) FROM chuva_diaria WHERE estacao_id = 'E03' AND chuva_mm > 50").fetchone()[0]
+c = tuple(con.execute("""
+    WITH mensal AS (SELECT * FROM (
+        SELECT estacao_id AS estacao, strftime('%Y-%m', data) AS mes, ROUND(SUM(chuva_mm), 1) AS total_mm,
+               COUNT(chuva_mm) = CAST(strftime('%d', date(MIN(data), 'start of month', '+1 month', '-1 day')) AS INTEGER) AS completo
+        FROM chuva_diaria GROUP BY estacao_id, mes))
+    SELECT mes, total_mm FROM mensal WHERE estacao = 'E03' AND completo ORDER BY total_mm DESC LIMIT 1
+""").fetchone())
+d = con.execute("""
+    SELECT COUNT(*) FROM (
+        SELECT 1 FROM chuva_diaria GROUP BY estacao_id, strftime('%Y-%m', data)
+        HAVING COUNT(chuva_mm) < CAST(strftime('%d', date(MIN(data), 'start of month', '+1 month', '-1 day')) AS INTEGER))
+""").fetchone()[0]
+e = tuple(con.execute("SELECT chuva_mm, data FROM chuva_diaria WHERE estacao_id = 'E01' ORDER BY chuva_mm DESC, data LIMIT 1").fetchone())
+print(a, b, c, d, e)
+assert (a, b, c, d, e) == (730, 10, ("2025-01", 534.2), 7, (90.0, "2024-12-09"))
+```
+Resultado: **730**, **10**, **janeiro de 2025 com 534,2 mm**, **7** e **90,0 mm em 9/12/2024**, os mesmos cinco números da Semana 2. Duas contas independentes que dão igual são o que dá confiança. Repare em dois cuidados: no (b), `chuva_mm > 50` já descarta os `NULL` (a comparação com `NULL` não é verdadeira); e no (c), `completo` é `1` ou `0`, e `WHERE ... completo` usa isso como condição.
+:::
+
+**Exercício 2 (preveja o NULL).** Uma tabela tem a coluna `mm` com os valores `5, NULL, NULL, 15, 0`. Sem rodar, preveja: (a) `COUNT(*)`; (b) `COUNT(mm)`; (c) `SUM(mm)`; (d) `AVG(mm)`; (e) quantas linhas satisfazem `mm > 3`; (f) quantas satisfazem `mm <= 3`; (g) por que (e) + (f) não somam `COUNT(*)`. Depois confira.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 2
+```python
+t2 = sqlite3.connect(":memory:")
+t2.execute("CREATE TABLE m (mm REAL)")
+t2.executemany("INSERT INTO m VALUES (?)", [(5.0,), (None,), (None,), (15.0,), (0.0,)])
+um = lambda sql: t2.execute(sql).fetchone()[0]
+res = (um("SELECT COUNT(*) FROM m"), um("SELECT COUNT(mm) FROM m"), um("SELECT SUM(mm) FROM m"),
+       round(um("SELECT AVG(mm) FROM m"), 4), um("SELECT COUNT(*) FROM m WHERE mm > 3"), um("SELECT COUNT(*) FROM m WHERE mm <= 3"))
+print(res)
+assert res == (5, 3, 20.0, 6.6667, 2, 1)
+assert res[4] + res[5] == 3 and res[4] + res[5] != res[0]
+```
+Resultado: (a) **5**; (b) **3**; (c) **20,0**; (d) **6,6667** (20 / 3, não 20 / 5); (e) **2** (5 e 15); (f) **1** (só o 0); (g) as duas linhas `NULL` não satisfazem **nem** `mm > 3` **nem** `mm <= 3` (a comparação dá `NULL`), então 2 + 1 = 3, e não 5. Para contá-las: `WHERE mm IS NULL`.
+:::
+
+**Exercício 3 (mudar a regra do esquema).** Uma regra nova: o banco deve recusar chuva diária acima de 300 mm, como a limpeza em Python já faz. (a) Mostre que o esquema atual **aceita** 350 mm. (b) Altere o texto do esquema em memória para recusar, e prove que 350 é recusado. (c) Prove que a carga dos dados oficiais ainda funciona com a regra nova.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 3
+```python
+esquema_atual = Path("projeto_chuva/sql/esquema.sql").read_text(encoding="utf-8")
+regra_atual = "chuva_mm >= 0"
+assert esquema_atual.count(regra_atual) == 1
+esquema_novo = esquema_atual.replace(regra_atual, "chuva_mm BETWEEN 0 AND 300")
+
+
+def banco_com_esquema(texto):
+    c = banco.conectar()
+    c.executescript(texto)
+    c.execute("INSERT INTO estacao VALUES ('A', 'T', -21, -41, 1, 'B')")
+    return c
+
+
+def aceita_350(c):
+    try:
+        c.execute("INSERT INTO chuva_diaria VALUES ('A', '2024-01-01', 350.0)")
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+antes = aceita_350(banco_com_esquema(esquema_atual))
+depois = aceita_350(banco_com_esquema(esquema_novo))
+
+c3 = banco.conectar()
+c3.executescript(esquema_novo)
+banco.carregar_estacoes(c3, "projeto_chuva/dados/estacoes.csv")
+n_carregadas = banco.carregar_chuva(c3, registros)
+print(antes, depois, n_carregadas)
+assert (antes, depois, n_carregadas) == (True, False, 2920)
+```
+Resultado: o esquema atual **aceita** 350 mm (`True`); o novo **recusa** (`False`); e a carga oficial continua entrando, as mesmas **2 920** linhas, porque a limpeza em Python já tinha descartado o valor acima de 300 mm. Isso é *defesa em profundidade*: duas camadas conferem a mesma regra. No projeto real, a mudança vira um issue, um PR que altera `esquema.sql`, um teste novo em `test_banco.py` e uma linha no `CHANGELOG`.
+:::
+
+**Exercício 4 (janela por estação).** Calcule, com `PARTITION BY estacao_id`, o total acumulado de chuva de **janeiro de 2025** para todas as estações, e prove que o último acumulado de cada estação é igual ao `total_mm` de janeiro de 2025 da consulta `02_total_mensal`.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 4
+```python
+ultimos = {l[0]: l[1] for l in con.execute("""
+    SELECT estacao_id, ROUND(acumulado, 1) FROM (
+        SELECT estacao_id, data,
+               SUM(chuva_mm) OVER (PARTITION BY estacao_id ORDER BY data) AS acumulado,
+               ROW_NUMBER() OVER (PARTITION BY estacao_id ORDER BY data DESC) AS posicao
+        FROM chuva_diaria WHERE data BETWEEN '2025-01-01' AND '2025-01-31')
+    WHERE posicao = 1 ORDER BY estacao_id""")}
+mensais = {l["estacao"]: l["total_mm"] for l in banco.executar_consulta(con, "02_total_mensal") if l["mes"] == "2025-01"}
+print(ultimos)
+assert ultimos == mensais and set(ultimos) == {"E01", "E02", "E03", "E04"}
+assert ultimos["E03"] == 534.2
+```
+Resultado: para as quatro estações, o último acumulado é igual ao total mensal (E03: **534,2 mm**). `PARTITION BY` reinicia a soma a cada estação, e `ROW_NUMBER() ... ORDER BY data DESC` escolhe a última linha de cada uma. Um acumulado que não bate com o total é o aviso clássico de janela errada.
+:::
+
+**Desafio (um índice novo, do SQL ao teste).** Escreva uma consulta `07_maior_chuva_diaria` que devolva, por estação, a maior chuva de um dia e a data (desempate: a data mais antiga), usando `ROW_NUMBER()`. Prove que ela dá o mesmo que Python nas quatro estações e **plante um caso pequeno** com empate para provar o desempate. É o ciclo completo do capítulo, em miniatura: SQL, Python, teste de consistência, caso de borda.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do desafio
+```python
+from datetime import date
+
+CONSULTA_07 = """
+WITH ordenadas AS (
+    SELECT estacao_id, chuva_mm, data,
+           ROW_NUMBER() OVER (PARTITION BY estacao_id ORDER BY chuva_mm DESC, data ASC) AS posicao
+    FROM chuva_diaria
+    WHERE chuva_mm IS NOT NULL
+)
+SELECT estacao_id AS estacao, chuva_mm, data
+FROM ordenadas
+WHERE posicao = 1
+ORDER BY estacao_id
+"""
+
+sql07 = {l[0]: (l[1], l[2]) for l in con.execute(CONSULTA_07)}
+py07 = {}
+for est in r.estacoes_em(registros):
+    s = r.serie(registros, est)
+    maior = max(v for v in s.values() if v is not None)
+    py07[est] = (maior, min(d for d, v in s.items() if v == maior).isoformat())
+print(sql07)
+assert sql07 == py07
+
+caso = banco.conectar()
+banco.criar_esquema(caso)
+caso.execute("INSERT INTO estacao VALUES ('A', 'T', -21, -41, 1, 'B')")
+caso.executemany("INSERT INTO chuva_diaria VALUES ('A', ?, ?)", [("2024-01-01", 5.0), ("2024-01-02", 2.0), ("2024-01-03", 5.0), ("2024-01-04", None)])
+assert [tuple(l) for l in caso.execute(CONSULTA_07)] == [("A", 5.0, "2024-01-01")]      # empate: vale a data mais antiga; NULL fica de fora
+assert sql07["E01"] == (90.0, "2024-12-09") and sql07["E03"] == (150.6, "2025-01-01")
+```
+Resultado: SQL e Python concordam nas quatro estações (E01 **90,0 mm** em 9/12/2024, E02 **57,3 mm**, E03 **150,6 mm** em 1/1/2025, E04 **58,9 mm**), e o caso pequeno prova o desempate e a exclusão do `NULL`. Para virar parte do projeto, o texto da consulta entraria em `sql/consultas/07_maior_chuva_diaria.sql`, ganharia um teste em `test_consistencia.py` e uma linha no `CHANGELOG.md`, tudo num PR com `Closes #N`.
+:::
+
+## Entregável da semana {#sec-s4-entregavel}
+
+Fechamento do módulo, no **seu repositório de treino**, tudo por PR:
+
+1. copie `sql/esquema.sql` e as consultas `01`, `02` e `05` para uma pasta `sql/`, e o módulo `banco.py` para `chuva/`; faça `python -m chuva banco --saida chuva.db` funcionar (adapte o `__main__` se tiver o seu) ou crie um script `criar_banco.py` que use `construir_banco`;
+2. escreva em `tests/` um teste `test_banco.py` com as **recusas** da @sec-s4-restricoes e um `test_consistencia.py` que compare **ao menos um índice** (por exemplo o maior período seco) entre Python e SQL;
+3. abra um issue "Criar banco e teste de consistência" e resolva-o por PR com `Closes #N`, vendo os testes ficarem verdes no GitHub;
+4. atualize o `CHANGELOG.md` e crie a tag `v0.1.0` com uma **release** (@sec-ciclo);
+5. adicione um arquivo `CLAUDE.md` ao seu repositório, adaptado do do livro, com **cinco linhas**: quem é você, qual é o projeto, como rodar os testes, o fluxo de ramos e PR, e o que ainda não foi verificado;
+6. abra um issue de **melhoria** para o próprio módulo (algo que travou ou confundiu), com o formulário `melhoria`. Esse é o primeiro passo do ritual da @sec-ciclo, e o combustível para a próxima versão deste material.
+
+Registre no Notion o *Nível atual* do módulo P0-00 como um todo e a data da próxima revisão (daqui a três meses).
+
+## Autoavaliação {#sec-s4-autoavaliacao}
+
+| Nível | Você consegue... |
+|:--|:--|
+| **1 · Reconheço** | Dizer o que são tabela, chave primária, chave estrangeira, índice e `NULL`; ler um `SELECT` com `GROUP BY` e `JOIN`. |
+| **2 · Explico** | Explicar por que `= NULL` não funciona, por que `AVG` ignora `NULL`, por que `CHECK` precisa de `IS`, a diferença entre `ROWS` e `RANGE`, e por que parâmetros evitam a injeção de SQL. |
+| **3 · Executo** | Modelar duas tabelas ligadas, carregar dados, escrever uma consulta com janela, testar Python contra SQL, lançar uma versão com tag, release e `CHANGELOG`. |
+| **4 · Ensino** | Montar uma aula de 40 min em que alunos planejam defeitos num CSV, carregam no SQLite, descobrem quais o banco recusa e quais passam, e discutem o que cada camada (Python, esquema, teste) deve conferir. |
+
+## Para ir além {#sec-s4-alem}
+
+* **DuckDB:** banco analítico em um arquivo, com SQL muito parecido e leitura direta de CSV e Parquet; o próximo passo natural quando os dados crescem (módulo P3-01).
+* **SQL espacial:** SpatiaLite (SQLite) e PostGIS (PostgreSQL) acrescentam geometrias e consultas como "estações a menos de 10 km do rio" (P3).
+* **pytest:** executa os testes `unittest` deste projeto sem alterações e permite escrever com `assert` simples (P1-03).
+* **pre-commit:** roda verificações antes de cada commit.
+* **Codespaces e github.dev:** editar e rodar o projeto no navegador, sem instalar nada.
+* **Documentação:** *SQLite* (sqlite.org/docs.html), em especial as páginas *Window Functions* e *Datatypes*, e o *GitHub Docs*.

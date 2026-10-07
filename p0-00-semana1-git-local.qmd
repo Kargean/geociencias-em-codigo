@@ -1,0 +1,500 @@
+# Semana 1 · Git: guardar a história do projeto {#sec-p000-s1}
+
+::: {.callout-note icon=false}
+## Neste capítulo
+
+**Pergunta que guia tudo:** como saber, daqui a seis meses, o que mudou no meu projeto, quando, por quê, e como voltar atrás se eu errar?
+
+**Você vai ser capaz de:**
+
+1. explicar as quatro áreas do Git (pasta de trabalho, área de preparação, repositório local, remoto) e qual comando leva uma mudança de uma para a próxima;
+2. fazer o ciclo editar → preparar → gravar e escrever mensagens de commit que fazem sentido depois;
+3. **ver** o que mudou (`status`, `diff`, `log`) e **desfazer com segurança** (`restore`, `revert`, `reflog`);
+4. escolher o que **não** versionar e nunca enviar um segredo ao GitHub;
+5. criar um repositório no GitHub e enviar o seu projeto para lá.
+
+**Pré-requisitos:** o módulo todo começa do zero. Leia antes a @sec-instalar para instalar Git e (opcionalmente) `gh`.
+
+**Tempo sugerido:** 3 h, em duas sessões: (1) da @sec-git-problema até a @sec-git-ver, só leitura e comandos no laboratório do livro; (2) da @sec-git-ignore até o @sec-s1-entregavel, no seu computador.
+:::
+
+## O problema que o Git resolve {#sec-git-problema}
+
+Você já viu isto: `relatorio.docx`, `relatorio_v2.docx`, `relatorio_final.docx`, `relatorio_final_REVISADO_agora_vai.docx`. Cada cópia guarda uma versão, mas nenhuma diz **o que mudou**, **por quê** e **quem** mudou. Com código e dados, o problema piora: uma mudança em um arquivo pode quebrar outro, e você só percebe semanas depois.
+
+O **Git** resolve isso guardando *fotografias* do projeto, chamadas **commits**. Cada commit registra:
+
+* o estado de **todos** os arquivos naquele instante;
+* uma **mensagem** que você escreve, explicando a mudança;
+* **autor** e **data**;
+* o commit que veio **antes** (é assim que a história forma uma corrente).
+
+Com essa corrente, o Git responde a perguntas que nenhuma pasta de cópias responde: o que mudou entre ontem e hoje? quando esta linha apareceu? qual mudança quebrou o teste? como volto ao estado de terça-feira?
+
+**Git** é o programa que roda no seu computador. **GitHub** é um *site* que guarda uma cópia do seu repositório na nuvem e acrescenta ferramentas de colaboração (issues, pull requests, testes automáticos). Dá para usar Git sem GitHub; o contrário não.
+
+## As quatro áreas {#sec-git-areas}
+
+Quase toda confusão com Git vem de não saber **onde** uma mudança está. Há quatro lugares (@fig-fluxo-git):
+
+1. **Pasta de trabalho:** os arquivos que você abre e edita.
+2. **Área de preparação** (*stage* ou *index*): o rascunho do próximo commit. Você escolhe ali o que vai entrar.
+3. **Repositório local:** a história, guardada na pasta oculta `.git`. Cada commit gravado fica aqui.
+4. **Remoto:** a cópia no GitHub, chamada por convenção de `origin`.
+
+```{python}
+#| label: fig-fluxo-git
+#| echo: false
+#| fig-cap: "Os quatro lugares onde uma mudança pode estar. Setas azuis levam a mudança para a frente (guardar); setas vermelhas trazem ou desfazem. Repare que `git pull` não é um comando primitivo: é `git fetch` (trazer) seguido de `git merge` (juntar)."
+import matplotlib.pyplot as plt
+from geocodigo.laboratorio_git import Laboratorio, figura_fluxo_git
+
+figura_fluxo_git()
+plt.show()
+```
+
+Por que a área de preparação existe? Porque você pode ter mexido em três arquivos mas querer gravar só dois, numa mudança com um propósito claro. O *stage* é onde você monta o commit com calma. Guarde esta imagem: cada comando deste capítulo é uma seta dela.
+
+## Configurar o Git (uma vez só) {#sec-git-config}
+
+Antes do primeiro commit, o Git precisa saber **quem é você**, porque o nome e o e-mail ficam gravados em cada commit. Rode estes comandos no seu terminal, trocando pelos seus dados:
+
+```bash
+git config --global user.name "Seu Nome"
+git config --global user.email "seu.email@exemplo.com"
+git config --global init.defaultBranch main
+```
+
+O terceiro faz com que os repositórios novos comecem na ramificação chamada `main`, que é o nome que o GitHub usa. O laboratório do livro executa exatamente esses comandos, mas com um arquivo de configuração **próprio e descartável**, para não mexer no seu:
+
+```{python}
+#| echo: false
+lab = Laboratorio()
+lab.git("--version")
+lab.git('config --global user.name "Seu Nome"')
+lab.git('config --global user.email "seu.email@exemplo.com"')
+lab.git("config --global init.defaultBranch main")
+lab.git("config --global --list")
+```
+
+::: {.callout-warning}
+## O e-mail dos commits é público
+
+Em repositório público, o e-mail gravado nos commits fica visível para qualquer pessoa. O GitHub permite usar um endereço de e-mail "noreply" (algo como `12345678+seu-usuario@users.noreply.github.com`, o número e o formato exatos aparecem em *Settings → Emails*) e há uma opção para manter o seu e-mail real privado. Escolha com calma **antes** do primeiro commit; depois, o e-mail já está na história.
+:::
+
+## O ciclo básico: editar, preparar, gravar {#sec-git-ciclo}
+
+Vamos criar um repositório e dar os primeiros passos. Em todos os comandos abaixo, leia a saída: ela diz **em que estado** estão os seus arquivos.
+
+```{python}
+#| echo: false
+lab.cd("chuva-estacoes")
+lab.git("init")
+lab.git("status")
+```
+
+O Git avisa que ainda não há commits. Vamos criar dois arquivos (no seu computador, você os criaria no editor):
+
+```{python}
+#| echo: false
+lab.escrever("README.md", "# Chuva em estações\n\nProjeto de estudo com dados sintéticos.\n")
+lab.escrever(".gitignore", "__pycache__/\n*.pyc\n*.db\n.venv/\n")
+lab.git("status")
+```
+
+**Untracked** quer dizer "o Git está vendo o arquivo, mas ainda não o acompanha". Para o arquivo entrar no próximo commit, ele precisa ir para a área de preparação:
+
+```{python}
+#| echo: false
+lab.git("add README.md")
+lab.git("status")
+```
+
+Agora há dois grupos: **Changes to be committed** (preparado: `README.md`) e **Untracked files** (ainda de fora: `.gitignore`). O Git mostra, entre parênteses, o comando para desfazer cada passo; leia essas dicas, elas ensinam. Vamos preparar o outro arquivo e gravar o commit:
+
+```{python}
+#| echo: false
+lab.git("add .gitignore")
+lab.git('commit -m "Primeiro commit: README e .gitignore"')
+lab.git("log")
+```
+
+O `commit -m` grava a fotografia com a mensagem entre aspas. A primeira linha da resposta mostra a ramificação (`main`), o **início da identidade do commit** (um código, o *hash*) e a mensagem. O `git log` mostra a história: autor, data e mensagem. O `commit` completo tem um código de 40 caracteres; os 7 primeiros costumam bastar.
+
+Agora o ciclo de verdade. Um arquivo novo, depois uma melhoria nele:
+
+```{python}
+#| echo: false
+lab.escrever("leitura.py", 'def ler_valor(texto):\n    return float(texto)\n')
+lab.git("add leitura.py")
+lab.git('commit -m "Adiciona leitura.py"')
+lab.escrever("leitura.py", 'def ler_valor(texto):\n    """Converte texto em número; vírgula vira ponto."""\n    return float(texto.replace(",", "."))\n')
+lab.git("status --short")
+```
+
+O `--short` resume: ` M leitura.py` quer dizer *modified* (a coluna da direita diz que a mudança está na pasta de trabalho, ainda sem preparar). Aprenda a ler as duas colunas:
+
+| Código | Esquerda (stage) | Direita (pasta de trabalho) |
+|:--|:--|:--|
+| `??` | | arquivo novo, não acompanhado |
+| ` M` | | modificado, **não** preparado |
+| `M ` | modificado e **preparado** | |
+| `A ` | arquivo novo **preparado** | |
+| `AM` | novo e preparado | **e** modificado depois de preparar |
+
+## Ver o que mudou {#sec-git-ver}
+
+Antes de gravar, **olhe o que vai gravar**. É o hábito que mais evita erro.
+
+```{python}
+#| echo: false
+lab.git("diff")
+lab.git("add leitura.py")
+lab.git("diff")
+lab.git("diff --staged")
+```
+
+Três lições nessa saída:
+
+1. `git diff` mostra o que mudou na pasta de trabalho **em relação ao stage**. Depois do `add`, ele fica vazio, porque não há mais diferença.
+2. `git diff --staged` mostra o que mudou **entre o stage e o último commit**: exatamente o que o próximo commit vai gravar.
+3. Como ler um diff: linhas com `-` foram **removidas**, linhas com `+` foram **acrescentadas**, linhas sem marca são contexto. O `@@ -1,2 +1,3 @@` diz onde (linha 1, dois trechos de 2 e 3 linhas).
+
+```{python}
+#| echo: false
+lab.git('commit -m "ler_valor aceita vírgula decimal"')
+lab.git("log --oneline")
+lab.git("show --stat HEAD")
+```
+
+`git log --oneline` é a visão compacta da história (a mais usada). `git show` mostra um commit inteiro; `HEAD` é o apelido do commit em que você está agora, o mais recente da ramificação atual.
+
+## O que *não* versionar {#sec-git-ignore}
+
+Versionar tudo parece seguro, mas não é. O Git guarda **para sempre** o que entra num commit. Fica de fora, por regra:
+
+* **segredos:** senhas, *tokens*, chaves de API, arquivos `.env`. Um segredo que foi para um commit **continua na história** mesmo depois de apagado do arquivo. Se acontecer: **revogue o segredo primeiro** (no serviço que o emitiu) e só depois limpe a história;
+* **arquivos gerados** que o código recria (`__pycache__/`, `*.pyc`, bancos `*.db` criados pelos scripts, a pasta `_book/`);
+* **ambientes** do Python (`.venv/`);
+* **arquivos grandes** ou dados que mudam toda hora. Dados pequenos e **oficiais** (como os CSVs deste módulo) podem e devem entrar.
+
+A lista fica no arquivo `.gitignore`, um padrão por linha. Veja o efeito:
+
+```{python}
+#| echo: false
+lab.escrever("chuva.db", "banco de dados gerado pelo script", mostrar=False)
+lab.escrever("__pycache__/leitura.cpython-313.pyc", "lixo gerado pelo Python", mostrar=False)
+print("# criamos chuva.db e __pycache__/leitura.cpython-313.pyc")
+lab.git("status")
+lab.git("status --ignored --short")
+```
+
+O `status` diz que não há nada a gravar: os dois arquivos existem, mas o `.gitignore` manda o Git ignorá-los. Com `--ignored` você os vê marcados com `!!`. Atenção: o `.gitignore` só vale para arquivos **que ainda não foram versionados**. Se um arquivo já entrou num commit, ignorá-lo depois não o tira da história.
+
+## Desfazer com segurança {#sec-git-desfazer}
+
+Errar é normal. A questão é escolher o comando certo, porque alguns são seguros e um é perigoso.
+
+| Quero... | Comando | Risco |
+|:--|:--|:--|
+| descartar a edição de um arquivo (voltar ao último commit) | `git restore arquivo` | **perde** a edição não gravada |
+| tirar um arquivo do stage, mantendo a edição | `git restore --staged arquivo` | nenhum |
+| corrigir a **última** mensagem ou acrescentar um esquecido | `git commit --amend` | reescreve o commit: **só antes de enviar** |
+| desfazer um commit **já enviado**, de forma pública | `git revert COMMIT` | seguro: cria um commit novo que desfaz o outro |
+| jogar fora commits e edições, voltando a um ponto | `git reset --hard COMMIT` | **perigoso**: apaga trabalho |
+| achar um commit "perdido" | `git reflog` | nenhum (é só leitura) |
+
+Vamos ver cada um. Primeiro os dois `restore`:
+
+```{python}
+#| echo: false
+lab.escrever("leitura.py", "def ler_valor(texto):\n    return 42\n")
+lab.git("status --short")
+lab.git("restore leitura.py")
+lab.git("status --short")
+lab.mostrar_arquivo("leitura.py")
+print()
+lab.escrever("leitura.py", "def ler_valor(texto):\n    return 42\n", mostrar=False)
+print("# (editamos de novo, e desta vez preparamos por engano)")
+lab.git("add leitura.py")
+lab.git("status --short")
+lab.git("restore --staged leitura.py")
+lab.git("status --short")
+lab.git("restore leitura.py", mostrar=False)
+```
+
+Na primeira vez, `restore` **jogou fora** a edição ruim (o arquivo voltou ao que estava no último commit). Na segunda, `restore --staged` só tirou do stage: a edição continuou lá (` M`). Agora um commit ruim e como desfazê-lo **sem reescrever a história**:
+
+```{python}
+#| echo: false
+lab.escrever("leitura.py", "def ler_valor(texto):\n    return 42\n", mostrar=False)
+lab.git('commit -am "Muda ler_valor (ruim)"')
+lab.git("revert --no-edit HEAD")
+lab.git("log --oneline")
+lab.mostrar_arquivo("leitura.py")
+```
+
+O `revert` **não apaga** o commit ruim: ele cria um commit novo que faz o contrário. A história fica honesta (o erro e a correção aparecem) e funciona mesmo que o commit ruim já tenha sido enviado ao GitHub. Já o `reset --hard` reescreve a história e apaga trabalho. Veja o susto e o resgate pelo `reflog`, o diário de tudo o que o `HEAD` fez:
+
+```{python}
+#| echo: false
+lab.escrever("extra.py", "x = 1\n", mostrar=False)
+lab.git("add extra.py", mostrar=False)
+lab.git('commit -m "Adiciona extra.py"')
+lab.git("reset --hard HEAD~1")
+lab.git("log --oneline")
+print("# o commit 'Adiciona extra.py' sumiu do log. Perdeu? Não: o reflog lembra.")
+lab.git("reflog")
+lab.git("reset --hard HEAD@{1}")
+lab.git("log --oneline")
+```
+
+`HEAD~1` significa "um commit antes do atual". Depois do `reset`, o commit `Adiciona extra.py` não aparece mais no `log`, mas o `reflog` ainda o lista (como `HEAD@{1}`, "onde o HEAD estava um movimento atrás"). Voltar a ele foi só um novo `reset --hard`. **Regra prática:** o Git raramente perde um commit gravado; ele perde edições que **nunca** foram gravadas. Por isso: grave cedo, grave sempre. O `reflog` guarda os movimentos por um tempo limitado (dias a meses), então resgate logo.
+
+Por fim o `--amend`, que corrige o **último** commit. Use somente se ele ainda não foi enviado, porque ele **troca** o commit por outro, com outra identidade:
+
+```{python}
+#| echo: false
+lab.escrever("README.md", "# Chuva em estações\n\nProjeto de estudo com dados sintéticos (quatro estações fictícias).\n", mostrar=False)
+lab.git('commit -am "readme"')
+lab.git('commit --amend -m "README: explica que as estações são fictícias"')
+lab.git("log --oneline")
+```
+
+Compare os dois códigos de commit (`readme` e o novo): são diferentes. Se o primeiro já estivesse no GitHub, quem tivesse baixado a história ficaria com um commit que "não existe mais" e a sincronização daria conflito.
+
+## Mensagens de commit que ajudam {#sec-git-mensagens}
+
+A mensagem é para **o você do futuro**. Duas regras bastam:
+
+1. **Uma ideia por commit.** Se a mensagem precisa de um "e", talvez sejam dois commits.
+2. **Primeira linha curta (até uns 60 caracteres), no imperativo, dizendo o que o commit faz**: "Adiciona leitura do CSV", "Corrige limiar de dia seco".
+
+| Ruim | Bom |
+|:--|:--|
+| `ajustes` | `Corrige arredondamento do total mensal` |
+| `mudanças de hoje` | `Aceita vírgula decimal na leitura do CSV` |
+| `agora vai` | `Move limiar para constante nomeada` |
+| `atualizações e correções e testes` | três commits, um para cada coisa |
+
+Um teste simples: o `git log --oneline` do seu projeto deve contar a história sem você abrir nenhum arquivo.
+
+## Versões com tags {#sec-git-tags}
+
+Um commit é uma fotografia; uma **tag** é uma etiqueta num commit, para marcar um marco (a versão `v0.1.0`, a entrega do relatório, a versão que foi publicada). Use tags *anotadas*, que levam mensagem, autor e data:
+
+```{python}
+#| echo: false
+lab.git('tag -a v0.1.0 -m "Primeira versão estável"')
+lab.git("tag")
+lab.git("show --stat v0.1.0")
+```
+
+Mais adiante (Semana 4), a tag vira um *release* no GitHub, e é o que permite dizer "usei a versão 0.1.0 do código" num artigo, com precisão.
+
+## Do seu computador ao GitHub {#sec-git-github}
+
+Até aqui tudo ficou na sua máquina. Para ter uma cópia na nuvem, fazemos quatro coisas: **entrar** (autenticar), **criar um repositório vazio** no GitHub, **ligar** a pasta local a ele e **enviar** os commits.
+
+### Passo 1: autenticar
+
+O GitHub **não aceita mais senha** para operações do Git. A forma recomendada em sua documentação é usar a **GitHub CLI** ou o **Git Credential Manager**, que abrem o navegador, fazem o login e lembram de você. Com a CLI:
+
+```bash
+gh auth login        # escolha GitHub.com, depois HTTPS, aceite autenticar o Git, e entre pelo navegador
+gh auth status       # confere se deu certo
+```
+
+No Windows, se você instalou o Git pelo instalador oficial, o *Git Credential Manager* já está incluído e abre o navegador na primeira vez que você enviar algo.
+
+::: {.callout-warning}
+## Nunca cole um token em arquivo nem em mensagem
+
+Se um dia usar um *personal access token* (uma "senha" gerada no site), trate-o como senha: não vai para o repositório, não vai para o chat, não vai para print. Se vazar, revogue em *Settings → Developer settings*.
+:::
+
+### Passo 2: criar o repositório vazio no site
+
+No GitHub: botão **+** no canto superior direito → **New repository**. Nome: `chuva-estacoes`. Escolha **Public** para o treino (veja a nota abaixo). **Não** marque *Add a README*, *.gitignore* nem *license*: você já tem esses arquivos localmente, e criá-los no site geraria uma história diferente da sua. Clique em **Create repository**. A página seguinte mostra o endereço (`https://github.com/SEU-USUARIO/chuva-estacoes.git`) e, em *"…or push an existing repository from the command line"*, os comandos do passo seguinte.
+
+::: {.callout-tip}
+## Público ou privado?
+
+Para o treino, **público**: não há segredo nenhum (os dados são sintéticos) e o GitHub Actions é gratuito para repositórios públicos. Em repositórios **privados** da conta gratuita há uma cota mensal de minutos de Actions (2 000 minutos por mês, segundo a documentação de cobrança; confira o valor atual). Seu material de trabalho com dados reais ou ainda não publicados deve ficar **privado**.
+:::
+
+### Passo 3 e 4: ligar e enviar
+
+O laboratório simula o GitHub com uma pasta local, mas você digita os endereços reais:
+
+```{python}
+#| echo: false
+url = lab.criar_github("seu-usuario", "chuva-estacoes")
+lab.git(f"remote add origin {url}")
+lab.git("remote -v")
+lab.git("push -u origin main")
+lab.git("push origin v0.1.0")
+lab.git("status")
+lab.git("branch -vv")
+```
+
+Leitura guiada:
+
+* `remote add origin URL` dá o apelido `origin` ao endereço do GitHub. É só um apelido; poderia ser outro nome.
+* `push -u origin main` envia a ramificação `main` e, com o `-u`, **liga** a `main` local à `origin/main`. Depois disso, `git push` e `git pull` sem argumentos já sabem para onde ir.
+* As tags **não** vão no `push` comum; foi preciso `push origin v0.1.0`.
+* No `status`, "Your branch is up to date with 'origin/main'" é a confirmação de que o local e o remoto estão iguais. No `branch -vv`, o texto entre colchetes mostra a ramificação remota acompanhada.
+
+Existe um atalho que faz os passos 2, 3 e 4 de uma vez, a partir da pasta do projeto, usando a CLI (não executamos aqui porque ele cria um repositório de verdade na sua conta):
+
+```bash
+gh repo create chuva-estacoes --public --source=. --remote=origin --push
+```
+
+### O que olhar na página do GitHub
+
+Abra `https://github.com/SEU-USUARIO/chuva-estacoes` no navegador e confira: a lista de arquivos, o `README.md` desenhado embaixo, o número de **commits** (clique nele para ver a mesma história do `git log`), e, em *Releases* ou *Tags*, a `v0.1.0`. Repare no que **não** está lá: `chuva.db` e `__pycache__`, graças ao `.gitignore`.
+
+## Erros clássicos {#sec-s1-erros}
+
+1. **`git add .` sem olhar.** Pode levar junto um arquivo temporário, um dado grande ou um segredo. Use `git status` antes e `git diff --staged` depois.
+2. **Mensagens vazias de sentido** ("ajustes"). Daqui a um mês, o `log` não ajuda em nada.
+3. **Um commit gigante** no fim do dia, com cinco assuntos. Quando um deles der problema, não dá para desfazer só ele.
+4. **`reset --hard` sem checar o que se perde.** Antes, rode `git status` e `git log --oneline`; se tiver dúvida, crie uma tag ou uma ramificação de segurança (`git branch backup`).
+5. **Editar arquivos pelo site do GitHub e esquecer.** O local fica para trás e o próximo `push` é recusado (veremos na Semana 3).
+6. **Segredo no commit.** Revogar vem **antes** de limpar a história.
+
+## Exercícios {#sec-s1-exercicios}
+
+Os gabaritos rodam no laboratório do livro; a primeira linha de cada um mostra como começar.
+
+**Exercício 1 (preveja, depois confira).** Num repositório com `a.txt` já gravado: você (i) edita `a.txt`, (ii) cria `b.txt`, (iii) faz `git add b.txt`, (iv) edita `b.txt` de novo. Sem rodar nada, escreva o que `git status --short` mostra. Depois confira.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 1
+```python
+lab1 = Laboratorio(identidade=True); lab1.cd("e1")
+lab1.git("init", mostrar=False)
+lab1.escrever("a.txt", "um\n", mostrar=False)
+lab1.git("add a.txt", mostrar=False); lab1.git('commit -m "a"', mostrar=False)
+lab1.escrever("a.txt", "um\ndois\n", mostrar=False)
+lab1.escrever("b.txt", "novo\n", mostrar=False)
+lab1.git("add b.txt", mostrar=False)
+lab1.escrever("b.txt", "novo\nmudou\n", mostrar=False)
+saida1 = lab1.git("status --short", mostrar=False)
+print(saida1)
+assert saida1.splitlines() == [" M a.txt", "AM b.txt"]
+```
+Resultado: ` M a.txt` e `AM b.txt`. O `b.txt` aparece com **duas** letras: o `A` (esquerda) diz que o arquivo novo está preparado; o `M` (direita) diz que ele foi **modificado depois** de preparado. Se você gravasse agora, o commit levaria a versão de `b.txt` de **antes** da última edição. É a prova de que o stage guarda uma fotografia, e não "o arquivo".
+:::
+
+**Exercício 2 (resgate).** Você tem 4 commits e rodou `git reset --hard HEAD~2` por engano. Recupere os 4 commits usando só comandos do Git.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 2
+```python
+lab2 = Laboratorio(identidade=True); lab2.cd("e2")
+lab2.git("init", mostrar=False)
+for i in range(1, 5):
+    lab2.escrever("n.txt", f"{i}\n", mostrar=False)
+    lab2.git("add n.txt", mostrar=False); lab2.git(f'commit -m "commit {i}"', mostrar=False)
+lab2.git("reset --hard HEAD~2", mostrar=False)
+assert len(lab2.git("log --oneline", mostrar=False).splitlines()) == 2
+lab2.git("reflog")
+lab2.git("reset --hard HEAD@{1}")
+assert len(lab2.git("log --oneline", mostrar=False).splitlines()) == 4
+assert lab2.ler("n.txt").strip() == "4"
+```
+Resultado: depois do `reset`, o `log` tem 2 linhas; o `reflog` mostra onde o `HEAD` estava; `reset --hard HEAD@{1}` traz os 4 commits de volta e o arquivo volta a conter `4`.
+:::
+
+**Exercício 3 (`.gitignore` com exceção).** Ignore todos os bancos `*.db`, **exceto** `dados/exemplo.db`, que você quer versionar. Mostre pelo `git status --short` que a regra funciona.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 3
+```python
+lab3 = Laboratorio(identidade=True); lab3.cd("e3")
+lab3.git("init", mostrar=False)
+lab3.escrever(".gitignore", "*.db\n!dados/exemplo.db\n", mostrar=False)
+for nome in ("chuva.db", "dados/exemplo.db", "dados/outro.db"):
+    lab3.escrever(nome, "x", mostrar=False)
+saida3 = lab3.git("status --short --untracked-files=all", mostrar=False)
+print(saida3)
+assert sorted(saida3.splitlines()) == ["?? .gitignore", "?? dados/exemplo.db"]
+```
+Resultado: só `.gitignore` e `dados/exemplo.db` aparecem. A `!` na frente de um padrão cria uma **exceção**. Cuidado: a exceção só funciona se a **pasta** que contém o arquivo não estiver ignorada; por isso a regra é `*.db` (arquivos) e não `dados/` (pasta inteira).
+:::
+
+**Exercício 4 (commits atômicos).** Você mexeu em três coisas não relacionadas: corrigiu um erro de digitação no `README.md`, criou `limiar.py` e mudou `config.txt`. Grave **três** commits, um por assunto, e prove que cada commit tocou **um** arquivo.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 4
+```python
+lab4 = Laboratorio(identidade=True); lab4.cd("e4")
+lab4.git("init", mostrar=False)
+lab4.escrever("README.md", "# Chuva\ntexto com erro de digitacao\n", mostrar=False)
+lab4.escrever("config.txt", "modo=A\n", mostrar=False)
+lab4.git("add .", mostrar=False); lab4.git('commit -m "Base"', mostrar=False)
+lab4.escrever("README.md", "# Chuva\ntexto sem erro de digitação\n", mostrar=False)
+lab4.escrever("limiar.py", "LIMIAR_MM = 1.0\n", mostrar=False)
+lab4.escrever("config.txt", "modo=B\n", mostrar=False)
+lab4.git('commit -m "README: corrige digitação" README.md', mostrar=False)   # só o arquivo indicado
+lab4.git("add limiar.py", mostrar=False); lab4.git('commit -m "Adiciona limiar.py"', mostrar=False)
+lab4.git("add config.txt", mostrar=False); lab4.git('commit -m "config: troca para o modo B"', mostrar=False)
+arquivos = [lab4.git(f"show --name-only --format= HEAD~{k}", mostrar=False).split() for k in range(3)]
+print(arquivos)
+assert arquivos == [["config.txt"], ["limiar.py"], ["README.md"]]
+```
+Resultado: cada commit lista um arquivo. Para separar mudanças de **dentro de um mesmo arquivo**, existe `git add -p`, que pergunta, trecho por trecho, o que preparar (é interativo, por isso não o executamos aqui).
+:::
+
+**Desafio (arqueologia).** Em quase todo projeto chega o dia de perguntar "quando esta constante apareceu e quem a mudou?". Monte uma história em que `LIMIAR_MM` é criado, depois alterado, e descubra os dois commits com `git log -S`.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do desafio
+```python
+lab5 = Laboratorio(identidade=True); lab5.cd("e5")
+lab5.git("init", mostrar=False)
+lab5.escrever("leitura.py", "x = 1\n", mostrar=False)
+lab5.git("add .", mostrar=False); lab5.git('commit -m "Cria leitura"', mostrar=False)
+lab5.escrever("leitura.py", "x = 1\nLIMIAR_MM = 1.0\n", mostrar=False)
+lab5.git('commit -am "Adiciona limiar"', mostrar=False)
+lab5.escrever("leitura.py", "x = 1\nLIMIAR_MM = 2.0\n", mostrar=False)
+lab5.git('commit -am "Muda limiar para 2.0"', mostrar=False)
+lab5.git('log -S"LIMIAR_MM = 1.0" --oneline')
+lab5.git("blame leitura.py")
+achados = lab5.git('log -S"LIMIAR_MM = 1.0" --format=%s', mostrar=False).splitlines()
+assert achados == ["Muda limiar para 2.0", "Adiciona limiar"]
+```
+Resultado: `log -S"texto"` lista os commits em que o **número de ocorrências** do texto mudou: o que o criou ("Adiciona limiar") e o que o fez sumir ("Muda limiar para 2.0"). O `git blame` mostra, linha a linha, em qual commit cada linha atual nasceu.
+:::
+
+## Entregável da semana {#sec-s1-entregavel}
+
+No **seu computador**, repita o que viu aqui com o seu repositório de treino:
+
+1. instale e configure o Git, e entre no GitHub (`gh auth login`);
+2. crie a pasta `chuva-estacoes`, rode `git init`, crie `README.md` e `.gitignore`;
+3. faça **cinco commits** com mensagens que passam no teste do `git log --oneline` (por exemplo: README, `.gitignore`, `leitura.py`, melhoria de `leitura.py`, README atualizado);
+4. no meio do caminho, **provoque e desfaça** um erro com `restore` e outro com `revert`;
+5. crie uma tag anotada `v0.0.1`;
+6. crie o repositório no GitHub (sem README), ligue e envie com `git push -u origin main` e `git push origin v0.0.1`;
+7. abra a página no navegador e confira que `chuva.db` **não** está lá.
+
+Registre no Notion o *Nível atual* de P0-00 e uma linha sobre o que travou.
+
+## Autoavaliação {#sec-s1-autoavaliacao}
+
+| Nível | Você consegue... |
+|:--|:--|
+| **1 · Reconheço** | Dizer o que são commit, stage, `HEAD`, remoto e `origin`; ler o resultado de `git status --short`. |
+| **2 · Explico** | Explicar, sem consultar, a diferença entre `restore`, `revert` e `reset --hard`; por que `git pull` é `fetch` mais `merge`; por que um segredo commitado não some ao ser apagado. |
+| **3 · Executo** | Criar um repositório do zero, fazer commits com boas mensagens, ver e desfazer mudanças, e enviar ao GitHub, sem copiar o capítulo. |
+| **4 · Ensino** | Montar uma aula de 30 min sobre as quatro áreas usando o laboratório do livro, com um exercício novo de previsão e resposta conferida. |
+
+## Para ir além {#sec-s1-alem}
+
+* **Interfaces gráficas:** o painel de Git do VS Code e o GitHub Desktop mostram as mesmas ideias com botões. Depois de entender os comandos, escolha a que preferir; o que você aprendeu aqui vale para todas.
+* **`git stash`:** guarda edições não gravadas numa "gaveta" para você trocar de assunto e voltar depois.
+* **Livro de referência gratuito:** *Pro Git*, de Scott Chacon e Ben Straub, disponível em git-scm.com/book.

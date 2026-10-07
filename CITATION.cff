@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "Se este material ajudar o seu trabalho, cite-o como abaixo."
+title: "Geociências em Código"
+authors:
+  - family-names: "Barbosa"
+    given-names: "Kargean Vianna"
+# Ao publicar a primeira versão (release), acrescente as linhas:
+#   version: 0.1.0
+#   date-released: AAAA-MM-DD

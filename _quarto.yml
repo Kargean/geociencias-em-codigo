@@ -1,0 +1,41 @@
+project:
+  type: book
+  output-dir: _book
+
+book:
+  title: "Geociências em Código"
+  subtitle: "Um livro-laboratório para entender, calcular e desenhar fenômenos da Terra"
+  author: "Kargean Vianna Barbosa"
+  date: today
+  search: true
+  # Depois de criar o repositório no GitHub, descomente e troque SEU-USUARIO:
+  # repo-url: https://github.com/SEU-USUARIO/geociencias-em-codigo
+  # repo-actions: [edit, issue]
+  chapters:
+    - index.qmd
+    - part: "P0 · Ambiente e método: módulo de partida (P0-00)"
+      chapters:
+        - p0-00-visao-geral.qmd
+        - p0-00-semana1-git-local.qmd
+        - p0-00-semana2-python-testes.qmd
+        - p0-00-semana3-github.qmd
+        - p0-00-semana4-sql-ciclo.qmd
+    - part: "P9 · Solo e rocha: exemplo desenvolvido (estrutural)"
+      chapters:
+        - cap-estrutural-atitudes.qmd
+
+bibliography: references.bib
+lang: pt-BR
+jupyter: python3
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    code-copy: true
+    code-overflow: wrap
+    fig-align: center
+
+execute:
+  warning: false

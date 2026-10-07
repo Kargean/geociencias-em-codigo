@@ -1,0 +1,9 @@
+# Dependências mínimas. Para fixar versões depois de tudo funcionando:  pip freeze > requirements-lock.txt
+numpy>=2.0
+pandas>=2.2
+matplotlib>=3.9
+jupyter
+ipykernel
+nbformat
+nbclient
+pyyaml

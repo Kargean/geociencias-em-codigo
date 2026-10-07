@@ -1,0 +1,46 @@
+# Apresentação {.unnumbered}
+
+**Geociências em Código** é um livro-laboratório: cada capítulo parte de um fenômeno da Terra, constrói o modelo mínimo que o descreve, produz uma figura que *precisa ser explicada* e termina com um experimento do tipo “e se?”. O código é parte do texto: roda, gera os resultados e pode ser alterado por quem lê.
+
+## Como cada capítulo é construído
+
+1. **Fenômeno:** o que estamos tentando entender (uma dobra, um aquífero, uma bacia, uma cena de satélite).
+2. **Modelo mínimo:** a menor ideia matemática ou computacional que o descreve.
+3. **Figura-resultado:** um gráfico ou mapa que o leitor tem de interpretar, com a leitura guiada.
+4. **E se?:** um controle (às vezes interativo) para mudar uma hipótese e ver o efeito.
+5. **Erro clássico:** a armadilha mais comum, demonstrada com números.
+6. **Exercícios com gabarito conferido em código** e uma **autoavaliação** em quatro níveis: *reconheço, explico, executo, ensino*.
+
+## Regras do método
+
+* **Dados sintéticos primeiro.** Quando a verdade é conhecida, dá para medir o erro do método. Dados reais entram depois, e comparados com o que aprendemos no sintético.
+* **Nada de “caixa-preta” na primeira vez.** Cada ferramenta é construída uma vez a partir da matemática; só depois usamos pacotes prontos, e os conferimos contra o nosso cálculo.
+* **Toda afirmação numérica do texto é conferida por teste** que roda o mesmo código do capítulo.
+* **Convenções declaradas.** Ângulos, sistemas de coordenadas e unidades vêm explicitados no início de cada assunto.
+
+## Foco e mapa do livro (em construção)
+
+O foco é a **pilha de ferramentas** da análise e modelagem ambiental, do básico da programação ao avançado: Python para dados, GIS e geoprocessamento, sensoriamento remoto e processamento digital de imagens, estatística, multivariada, geoestatística e aprendizado de máquina integrados ao geoprocessamento, bancos de dados em várias formas, APIs e interfaces, tudo versionado no GitHub e acompanhado no Notion. Hidrologia, bacias, hidrogeologia, geoquímica, geotecnia, estrutural e oceanografia entram como **aplicações** dessa pilha.
+
+| Parte | Tema |
+|:--|:--|
+| P0 | Ambiente e método: Git/GitHub, Python, Quarto, Actions, organização de projetos |
+| P1 | Programação e dados tabulares: tipos de dados, estruturas, funções, NumPy, pandas |
+| P2 | Dados espaciais: CRS, vetor, raster, cubos, malhas, interpolação, terreno, LiDAR |
+| P3 | Bancos de dados, APIs e interfaces: SQL, SQL espacial, NoSQL, APIs, linha de comando, painéis, PyQGIS |
+| P4 | Estatística aplicada: inferência, regressão, modelos generalizados, séries temporais, incerteza |
+| P5 | Multivariada e geoestatística |
+| P6 | Aprendizado de máquina espacial |
+| P7 | Sensoriamento remoto e PDI: física, processamento de imagens, Earth Engine, classificação, SAR, deep learning |
+| P8 | Água: bacias, hidrologia, hidrogeologia, hidrogeoquímica, erosão, qualidade da água, oceanografia (tópico) |
+| P9 | Solo e rocha: geoquímica, pedologia, estrutural, geotecnia, taludes, suscetibilidade |
+| P10 | WebGIS e automação de mapas, relatórios e pipelines |
+| P11 | Publicação, ensino e projetos integradores |
+
+O estudo **começa pelo módulo P0-00** (@sec-p000): um projeto do início ao fim, em quatro semanas, que ensina Git e GitHub, Python, SQL e testes (inclusive testes automáticos no GitHub) em cima de um mesmo conjunto de dados de chuva. O **capítulo de exemplo desenvolvido** é *Atitudes e projeção estereográfica* (@sec-estrutural-atitudes), módulo P9-06; ele mostra o método completo (fenômeno, modelo mínimo, figura, experimento, testes) aplicado a um tema de geologia.
+O acompanhamento de estudo (módulos, níveis e datas) fica no Notion; o código e o livro, neste repositório.
+
+::: {.callout-warning}
+## Estado atual
+Estão escritos o módulo de partida **P0-00** (visão geral e quatro capítulos de semana) e o capítulo de exemplo do P9-06. O restante do mapa será produzido semana a semana, sob demanda, com os mesmos critérios, e este livro é corrigido e atualizado pelo mesmo processo que o módulo P0-00 ensina (@sec-ciclo).
+:::

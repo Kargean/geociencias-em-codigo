@@ -1,0 +1,660 @@
+# Semana 2 · Python e testes: limpar um CSV sem enganar ninguém {#sec-p000-s2}
+
+::: {.callout-note icon=false}
+## Neste capítulo
+
+**Pergunta que guia tudo:** como transformar um CSV cheio de defeitos em dados confiáveis, e como **provar** que a limpeza não estragou nada?
+
+**Você vai ser capaz de:**
+
+1. usar os tipos básicos do Python (`str`, `int`, `float`, `bool`, `None`) e explicar por que `None` não é zero;
+2. ler e escrever funções com parâmetros, retorno, *docstring* e dicas de tipo; usar listas, dicionários, laços, arquivos e exceções;
+3. ler um CSV com o módulo `csv` e transformar linhas em objetos (`dataclass`);
+4. escrever **testes automáticos** com `unittest` e `doctest`, rodá-los e ler o resultado, inclusive quando falham;
+5. usar a ideia mais poderosa do módulo: testar o método contra uma **verdade conhecida**.
+
+**Pré-requisitos:** a Semana 1, ou ao menos saber rodar comandos no terminal. Nenhuma instalação de pacote: só a biblioteca padrão do Python 3.11 ou mais nova.
+
+**Tempo sugerido:** 3 h, em três sessões: (1) @sec-s2-arquivo a @sec-s2-funcoes; (2) @sec-s2-leitura a @sec-s2-decisoes; (3) @sec-s2-testes até o @sec-s2-entregavel.
+:::
+
+## O arquivo que recebemos {#sec-s2-arquivo}
+
+Um fornecedor (fictício) mandou o arquivo `chuva_diaria.csv`. Antes de escrever uma linha de código, **olhe o arquivo**. Aqui o Python faz o papel de um editor de texto:
+
+```{python}
+import sys
+from pathlib import Path
+
+sys.path.insert(0, "projeto_chuva")  # para o Python achar o pacote `chuva` deste módulo
+
+linhas = Path("projeto_chuva/dados/chuva_diaria.csv").read_text(encoding="utf-8").splitlines()
+print(len(linhas), "linhas (a primeira é o cabeçalho)")
+print("\n".join(linhas[:4]))
+```
+
+Três colunas: estação, data (no padrão `AAAA-MM-DD`, o **ISO 8601**, que ordena certo como texto) e chuva em milímetros. À primeira vista, parece bom. Vamos procurar problemas, como faria alguém desconfiado:
+
+```{python}
+for marca in ("-999", '"', ",,", "412"):
+    achadas = [l for l in linhas if marca in l]
+    print(f"{marca!r:8} aparece em {len(achadas):2d} linhas, por exemplo: {achadas[:2]}")
+```
+
+Há `-999` (um código que significa "sem medida") e linhas com **aspas**, o que indica texto com vírgula dentro, como `"10,0"`: a vírgula decimal brasileira num arquivo que usa ponto. Também existe `412`, um valor suspeito. Cada um desses problemas foi **plantado de propósito**, em posições conhecidas. A tabela do `projeto_chuva/README.md` lista todos. O nosso trabalho é escrever código que os trate **e** testes que provem isso.
+
+## Tipos de dados: o que o Python acha que cada coisa é {#sec-s2-tipos}
+
+Todo valor em Python tem um **tipo**. A pergunta "o que isto é?" resolve metade dos erros.
+
+```{python}
+exemplos = ["12.4", 12, 12.4, True, None, "12,4"]
+for v in exemplos:
+    print(f"{v!r:8} é do tipo {type(v).__name__}")
+```
+
+* `str` é texto. O que vem de um CSV é **sempre** `str`, mesmo que pareça número. `"12.4"` não soma com nada; precisa virar `float`.
+* `float` é número com casa decimal; `int`, inteiro; `bool`, verdadeiro ou falso (`True`/`False`).
+* `None` é "nada", a ausência de valor. **`None` não é zero** e não é texto vazio. Esse detalhe é o coração do capítulo.
+
+Converter é uma ação que **pode falhar**, e o Python avisa com uma *exceção*:
+
+```{python}
+print(float("12.4"))
+try:
+    float("12,4")
+except ValueError as erro:
+    print("ValueError:", erro)
+```
+
+`try`/`except` diz: "tente isto; se der *esse* tipo de erro, faça aquilo em vez de quebrar". Regra de ouro: capture o erro **específico** (`ValueError`), nunca um `except:` genérico, que esconde erros que você não previu.
+
+### O erro do -999
+
+Por que não deixar o `-999` como número e seguir? Veja o que acontece com a média diária de chuva da estação E01:
+
+```{python}
+from chuva import qualidade as q
+from chuva import resumo as r
+
+registros, relatorio = q.ler_chuva("projeto_chuva/dados/chuva_diaria.csv")
+validos = [x.chuva_mm for x in registros if x.estacao == "E01" and x.chuva_mm is not None]
+n_codigo = 5  # dias de E01 escritos como -999
+
+media_certa = sum(validos) / len(validos)
+media_errada = (sum(validos) - 999 * n_codigo) / (len(validos) + n_codigo)
+print(f"média correta (só medidas válidas):  {media_certa:6.3f} mm/dia")
+print(f"média com -999 tratado como número:  {media_errada:6.3f} mm/dia")
+```
+
+Uma **chuva média negativa**. Cinco linhas ruins em 730 bastaram para inverter o sinal. E há uma segunda armadilha: tratar o ausente como **zero** também mente (diz "não choveu" quando a verdade é "não sabemos"). Por isso o projeto converte ausente em `None`, que força o código a decidir o que fazer com o desconhecido.
+
+## Textos, listas e dicionários {#sec-s2-colecoes}
+
+Você vai usar coleções o tempo todo. As quatro principais:
+
+| Tipo | Exemplo | Para quê |
+|:--|:--|:--|
+| lista `list` | `[3, 1, 2]` | sequência ordenada e **mutável** |
+| tupla `tuple` | `("E01", 2024)` | sequência **imutável** (boa como "chave" ou como retorno com vários valores) |
+| dicionário `dict` | `{"E01": 730}` | busca por chave |
+| conjunto `set` | `{"E01", "E02"}` | elementos únicos, sem ordem |
+
+Um exemplo com o arquivo real: quantas linhas cada estação tem? E um aviso sobre por que existe o módulo `csv`:
+
+```{python}
+contagem = {}
+for linha in linhas[1:]:          # [1:] pula o cabeçalho
+    estacao = linha.split(",")[0]
+    contagem[estacao] = contagem.get(estacao, 0) + 1
+print(contagem, "| total:", sum(contagem.values()))
+
+# Dividir por vírgula quebra nas linhas com aspas:
+print('E02,2024-12-05,"10,0"'.split(","))
+```
+
+A contagem funcionou porque a estação é a primeira coluna. Mas repare na última linha: `.split(",")` cortou `"10,0"` em dois pedaços, `'"10'` e `'0"'`. **Nunca** divida CSV na mão; use o módulo `csv`, que entende aspas. (E repare que as estações têm quantidades de linhas **diferentes**: 731 dias, menos as linhas ausentes, mais as duplicadas. Esses números vão reaparecer.)
+
+Duas ferramentas que aparecem sempre:
+
+```{python}
+# compreensão de lista: criar uma lista a partir de outra em uma linha
+estacoes = sorted({l.split(",")[0] for l in linhas[1:]})   # conjunto -> lista ordenada
+print(estacoes)
+
+# enumerate dá o número de cada item; zip anda em duas listas juntas
+for numero, est in enumerate(estacoes, start=1):
+    print(numero, est)
+```
+
+## Funções: dar nome a um pedaço de lógica {#sec-s2-funcoes}
+
+Uma **função** recebe valores (parâmetros), faz algo e devolve um resultado (`return`). Boas funções têm um nome que diz o que fazem, um parâmetro de cada coisa de que dependem, e uma *docstring* (o texto entre `"""`) que explica. As **dicas de tipo** (`texto: str`, `-> tuple[float | None, str]`) não mudam como o código roda; são documentação que o editor e o leitor entendem.
+
+A função central do capítulo converte o texto de **uma célula** do CSV. Veja o código real do projeto, tal como está no arquivo:
+
+```{python}
+#| echo: false
+import inspect
+print(inspect.getsource(q.interpretar_valor))
+```
+
+Leitura guiada, de cima para baixo:
+
+1. `texto.strip()` tira espaços das pontas; célula vazia vira `None` com o motivo `'vazio'`.
+2. Se o texto está nos `CODIGOS_AUSENTE`, vira `None` com o motivo `'codigo'`. Essa **constante** com nome, em letras maiúsculas, é uma *decisão registrada*: se amanhã aparecer o código `-9999.9`, a mudança é num lugar só.
+3. Se há vírgula e também ponto (`1.234,5`), a função **para**: o formato é ambíguo (mil e meio? um e duzentos?), e adivinhar seria inventar dado. `raise ValueError(...)` interrompe com uma mensagem clara.
+4. Só depois a função verifica se o texto é um número de verdade (uma expressão regular, `\d+(\.\d+)?`, que significa "dígitos, e opcionalmente ponto e mais dígitos") e converte.
+5. Negativo e acima de 300 mm viram `None` com o motivo explicando por quê.
+
+O **retorno é uma dupla** `(valor, motivo)`: o chamador recebe o número **e** a razão, o que permite contar no relatório quantos casos de cada tipo apareceram.
+
+Note também que ela é uma **função pura**: o resultado depende só do parâmetro, e ela não lê arquivos nem altera nada fora dela. Funções puras são as mais fáceis de testar, porque você só precisa de uma entrada e de uma saída esperada.
+
+```{python}
+for texto in ["12.4", "12,4", "-999", "", "-3.2", "412.0"]:
+    print(f"{texto!r:8} -> {q.interpretar_valor(texto)}")
+```
+
+## Ler o arquivo com o módulo `csv` {#sec-s2-leitura}
+
+Agora a função que lê o arquivo inteiro. Ela usa o que vimos e mais quatro ideias novas: **arquivos** (`open` dentro de um `with`, que fecha o arquivo sozinho), o leitor `csv.DictReader` (entrega cada linha como dicionário), a *dataclass* `Registro` (um "molde" para uma medida) e a **decisão para chaves repetidas**:
+
+```{python}
+#| echo: false
+print(inspect.getsource(q.Registro))
+print(inspect.getsource(q.ler_chuva))
+```
+
+Pontos para observar:
+
+* `open(caminho, newline="", encoding="utf-8")`: o `newline=""` é o que o módulo `csv` pede, e o `encoding` evita que acentos virem lixo em outro sistema.
+* A **mensagem de erro informa a linha** do arquivo (`linha 3`), porque "erro na leitura" sozinho não ajuda ninguém.
+* `vistos` é um dicionário cuja **chave** é a dupla `(estação, data)`. Achar uma chave repetida é instantâneo, e é assim que duplicatas são detectadas.
+* A decisão para chaves repetidas está escrita na *docstring* e no código: vale a **primeira** linha. Se a segunda diz outra coisa, isso é contado como *duplicata conflitante* no relatório, em vez de sumir sem rastro.
+
+Rodando em todo o arquivo:
+
+```{python}
+registros, relatorio = q.ler_chuva("projeto_chuva/dados/chuva_diaria.csv")
+print(relatorio.texto())
+print()
+print(registros[0])
+print(registros[70])   # um dos dias -999
+```
+
+## A verdade conhecida: o relatório confere? {#sec-s2-verdade}
+
+Eis o que torna dados **sintéticos** tão úteis: nós sabemos quantos defeitos plantamos e onde. O gerador (`chuva/sintetico.py`) guarda isso. Compare o que o código **encontrou** com o que nós **plantamos**:
+
+```{python}
+from chuva import sintetico
+
+s = sintetico.gerar()
+plantado = {nome: len(lista) for nome, lista in s.defeitos.items()}
+encontrado = {
+    "ausente_codigo": relatorio.ausentes_codigo,
+    "ausente_vazio": relatorio.ausentes_vazio,
+    "virgula": relatorio.virgula_decimal,
+    "negativo": relatorio.negativos,
+    "acima_do_limite": relatorio.acima_do_limite,
+    "duplicata_exata": relatorio.duplicatas_exatas,
+    "duplicata_conflitante": relatorio.duplicatas_conflitantes,
+}
+print(f"{'defeito':24} {'plantado':>8} {'encontrado':>10}")
+for nome, n in encontrado.items():
+    print(f"{nome:24} {plantado[nome]:8d} {n:10d}")
+print(f"{'linha_ausente':24} {plantado['linha_ausente']:8d} {'(ver abaixo)':>10}")
+```
+
+Todos batem. Os dias **sem linha** não aparecem no relatório de leitura, porque não há o que ler; eles são achados por outra função, que procura buracos no calendário:
+
+```{python}
+for est in ("E01", "E04"):
+    print(est, q.datas_ausentes(registros, est))
+```
+
+E além de contar, podemos checar **valor por valor**: onde o código decidiu que há medida, ela é igual à verdade?
+
+```{python}
+achados = {(x.estacao, x.data): x.chuva_mm for x in registros}
+d = s.defeitos
+sem_medida = set(d["ausente_codigo"]) | set(d["ausente_vazio"]) | set(d["negativo"]) | set(d["acima_do_limite"])
+
+erradas = [k for k, v in achados.items() if k not in sem_medida and v != s.verdade[k]]
+print("medidas válidas diferentes da verdade:", len(erradas))
+print("dias sem medida que o código marcou como None:", sum(achados[k] is None for k in sem_medida), "de", len(sem_medida))
+```
+
+**Zero erros**: a limpeza recuperou a verdade em todo lugar onde ainda havia informação, e marcou como ausente exatamente os 11 dias em que a informação foi destruída. É assim que se sabe que um método funciona: medindo-o contra algo que se conhece. Em dados reais você jamais teria essa certeza; por isso treinamos aqui.
+
+## Decisões explícitas {#sec-s2-decisoes}
+
+Reveja o que o código **decidiu** por você. Cada regra poderia ser outra, e cada uma muda os resultados:
+
+| Decisão | Valor | Efeito de mudar |
+|:--|:--|:--|
+| códigos de ausente | `-999`, `-999.0`, `-9999` | outro código novo seria lido como número ou daria erro |
+| limite de chuva em um dia | 300 mm | aqui descartou 412 mm; um limite mais baixo descartaria chuvas reais |
+| chave repetida | vale a primeira linha | outra regra (a última, a maior) mudaria um valor |
+| dia chuvoso | `>= 1,0 mm` | muda dias de chuva e períodos secos |
+
+O limite de 300 mm, por exemplo, tem uma consequência concreta: o mês de janeiro de 2025 da estação E01 ficou **incompleto**, porque o dia de 412 mm foi descartado:
+
+```{python}
+m = r.total_mensal(registros)[("E01", "2025-01")]
+print(m)
+print("completo?", m.completo)
+```
+
+O total mensal `m.total_mm` é, portanto, um **piso**: soma só os 30 dias válidos. O campo `completo` existe para o leitor não esquecer disso. **Uma regra de limpeza é uma decisão científica**: ela precisa estar escrita, ter nome e poder ser discutida.
+
+## Testes: como saber que continua funcionando {#sec-s2-testes}
+
+Você acabou de conferir o código à mão. Se alguém mexer nele amanhã (ou você mesmo, daqui a três meses), terá de conferir tudo de novo? Não: você escreve **testes**, pequenos programas que rodam o seu código e verificam o resultado. Um teste tem sempre a mesma forma: **montar** uma situação, **executar** a função, **comparar** com o esperado. Neste projeto usamos `unittest`, que já vem com o Python.
+
+### Anatomia de um teste
+
+Este é um grupo de testes real do projeto (arquivo `projeto_chuva/tests/test_qualidade.py`):
+
+```{python}
+#| echo: false
+import importlib.util
+import inspect
+
+
+def carregar_teste(nome):
+    caminho = Path("projeto_chuva/tests") / f"{nome}.py"
+    spec = importlib.util.spec_from_file_location(nome, caminho)
+    modulo = importlib.util.module_from_spec(spec)
+    sys.modules[nome] = modulo          # o `inspect` precisa achar o módulo aqui para localizar o código-fonte
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
+t_qualidade = carregar_teste("test_qualidade")
+print(inspect.getsource(t_qualidade.InterpretarValor))
+```
+
+* Uma **classe** que herda de `unittest.TestCase` agrupa testes sobre o mesmo assunto.
+* Cada método cujo nome começa com `test_` é um teste. O nome deve dizer o que se espera (`test_menos_999_nunca_vira_numero`).
+* `self.assertEqual(obtido, esperado)` compara; se forem diferentes, o teste **falha** e mostra os dois valores. Há também `assertTrue`, `assertIsNone`, `assertAlmostEqual` (para números decimais) e `assertRaises` (para exigir que um erro aconteça).
+* `with self.subTest(texto=texto)` roda a mesma checagem para vários casos e, se um falhar, diz **qual**, sem interromper os outros.
+* Teste também o que **deve dar erro**: `test_texto_que_nao_e_numero_levanta_erro` garante que lixo não passa em silêncio.
+
+### Rodar
+
+```bash
+cd projeto_chuva
+python -m unittest discover -s tests -v
+```
+
+`discover -s tests` manda o Python procurar, na pasta `tests`, todos os arquivos `test*.py`; o `-v` (verboso) lista cada teste. Rodando de verdade:
+
+```{python}
+import re
+import subprocess
+import tempfile
+import shutil
+
+
+def rodar_testes(pasta="projeto_chuva", verboso=False):
+    """Roda `python -m unittest discover -s tests` em `pasta` e devolve (saída, código de saída)."""
+    comando = [sys.executable, "-m", "unittest", "discover", "-s", "tests"] + (["-v"] if verboso else [])
+    proc = subprocess.run(comando, cwd=pasta, capture_output=True, text=True)
+    return proc.stderr, proc.returncode   # o unittest escreve o resultado em stderr
+
+
+saida, codigo = rodar_testes(verboso=True)
+linhas_saida = saida.splitlines()
+print("\n".join(linhas_saida[:4]))
+print("   ...")
+print("\n".join(linhas_saida[-4:]))
+print("código de saída:", codigo)
+n_testes = int(re.search(r"Ran (\d+) tests", saida).group(1))
+```
+
+Há mais de cem testes e eles rodam em menos de um segundo. A última linha, `OK`, e o **código de saída 0** são o que importa: o código de saída é como um programa diz ao mundo "deu certo" (0) ou "falhou" (qualquer outro número). É por ele que o GitHub vai saber, na Semana 3, se os seus testes passaram.
+
+### Quando um teste falha: leia a mensagem
+
+Teste que nunca falha não prova nada. Vamos **estragar o código de propósito** numa cópia temporária do projeto (o original não é tocado) e ver o que o teste diz. Primeiro, tiramos o `-999` da lista de códigos de ausente:
+
+```{python}
+def copiar_projeto():
+    destino = Path(tempfile.mkdtemp(prefix="projeto-")) / "projeto_chuva"
+    shutil.copytree("projeto_chuva", destino, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.db"))
+    return destino
+
+
+def mutar(arquivo, de, para):
+    """Copia o projeto, troca `de` por `para` em `arquivo`, roda os testes e devolve (saída, código)."""
+    pasta = copiar_projeto()
+    alvo = pasta / arquivo
+    texto = alvo.read_text(encoding="utf-8")
+    assert de in texto, f"trecho não encontrado em {arquivo}: {de!r}"
+    alvo.write_text(texto.replace(de, para), encoding="utf-8", newline="\n")
+    resultado = rodar_testes(pasta)
+    shutil.rmtree(pasta.parent, ignore_errors=True)
+    return resultado
+
+
+def primeira_falha(saida):
+    """Primeiro bloco de falha de um teste `unittest` (não de doctest), sem o caminho temporário."""
+    for bloco in saida.split("=" * 70 + "\n"):
+        cabecalho = bloco.split("\n", 1)[0]
+        if cabecalho.startswith(("FAIL:", "ERROR:")) and "(test_" in cabecalho:
+            corpo = bloco.split("\n" + "-" * 70 + "\nRan")[0].strip()
+            return re.sub(r'[^\s"]*projeto-\w+[/\\]', "…/", corpo)
+    return "(nenhuma falha)"
+
+
+saida_m1, codigo_m1 = mutar("chuva/qualidade.py", 'CODIGOS_AUSENTE = frozenset({"-999", "-999.0", "-9999"})', "CODIGOS_AUSENTE = frozenset()")
+print(primeira_falha(saida_m1))
+print("...")
+print(saida_m1.strip().splitlines()[-1], "| código de saída:", codigo_m1)
+```
+
+Como ler: a primeira linha diz **qual teste** falhou (`test_ausentes_e_descartados`, da classe `InterpretarValor`) e **qual caso** dentro dele (`texto='-999'`, graças ao `subTest`). O *traceback* aponta a linha do teste que deu errado. E o fim mostra **obtido contra esperado**: `(None, 'negativo') != (None, 'codigo')`, isto é, o código devolveu `'negativo'` onde o teste esperava `'codigo'`, porque sem o `-999` na lista ele caiu na regra de valor negativo. Repare que o outro teste, `test_menos_999_nunca_vira_numero`, **continua passando** (nos dois casos o valor é `None`): é por isso que se escrevem vários testes, cada um olhando um aspecto. Mensagem de falha boa é a que diz **o que era esperado e o que veio**, e `assertEqual` faz isso de graça. (Dos sete testes que falharam, um é o `doctest` da própria função, que você conhece mais abaixo.)
+
+### Quatro erros plantados, quatro testes que acusam
+
+Repita o experimento com mais defeitos. Cada linha abaixo estraga **uma** coisa; o que importa é que **pelo menos um teste falhe**:
+
+```{python}
+mutacoes = [
+    ("None passa a contar como dia seco", "chuva/resumo.py", "seco = v is not None and v < limiar", "seco = v is None or v < limiar"),
+    ("período seco atravessa buracos de datas", "chuva/resumo.py", "(d - anterior).days == 1", "(d - anterior).days >= 1"),
+    ("limite de 300 mm vira 3000 mm", "chuva/qualidade.py", "if valor > LIMITE_MM_DIA:", "if valor > 3000:"),
+    ("total mensal sem arredondar", "chuva/resumo.py", "round(soma[chave], 1) if validos[chave] > 0", "soma[chave] if validos[chave] > 0"),
+]
+pegas = 0
+for descricao, arquivo, de, para in mutacoes:
+    saida_m, codigo_m = mutar(arquivo, de, para)
+    falhas = re.search(r"FAILED \((.*?)\)", saida_m)
+    pegas += codigo_m != 0
+    print(f"{'pego' if codigo_m != 0 else 'PASSOU DESPERCEBIDO':20} {descricao:45} {falhas.group(1) if falhas else ''}")
+print(f"{pegas} de {len(mutacoes)} defeitos plantados foram pegos")
+```
+
+Essa técnica se chama **teste de mutação**: planta-se um defeito e verifica-se se a suíte o detecta. Se algum passar despercebido, falta um teste. (Ao escrever este módulo, fizemos isso e dois defeitos em SQL passaram despercebidos pelos testes com os dados reais; acrescentamos casos pequenos e a Semana 4 conta a história.)
+
+### O teste mais valioso: contra a verdade conhecida
+
+O grupo de testes que mais vale neste projeto não confere uma função isolada: confere o **método inteiro** contra o que sabemos. É o que fizemos à mão na @sec-s2-verdade; agora ele está escrito como teste, e roda toda vez:
+
+```{python}
+#| echo: false
+t_dados = t_qualidade.LerChuvaDadosOficiais
+print(inspect.getsource(t_dados.test_limpeza_recupera_a_verdade_onde_ha_informacao))
+```
+
+Quando alguém alterar a limpeza, este teste responde na hora: "ainda recupera a verdade onde há informação?". É o tipo de teste que faz o código parecer menos frágil.
+
+### Testes que moram na documentação: `doctest`
+
+As linhas que começam com `>>>` dentro das *docstrings* são exemplos que o Python também sabe rodar como teste. Documentação que não mente:
+
+```{python}
+import doctest
+
+print(doctest.testmod(q))
+print(doctest.testmod(r))
+```
+
+`attempted` é o número de exemplos rodados e `failed=0` diz que todos passaram. Se você mudar o comportamento da função e esquecer de atualizar o exemplo, o `doctest` acusa.
+
+### Desenvolvimento guiado por testes: vermelho, verde
+
+Para uma função **nova**, uma boa disciplina é escrever o **teste primeiro**, vê-lo falhar (vermelho), escrever o mínimo de código para passar (verde) e só então melhorar. Vamos fazer isso com a função `fracao_validos`, "que fração das linhas de uma estação tem medida válida?", numa cópia temporária:
+
+```{python}
+TESTE_NOVO = """import unittest
+from pathlib import Path
+
+from chuva import qualidade as q
+from chuva import resumo as r
+
+CSV = Path(__file__).resolve().parents[1] / "dados" / "chuva_diaria.csv"
+
+
+class FracaoValidos(unittest.TestCase):
+    def test_estacao_e01(self):
+        registros, _ = q.ler_chuva(CSV)
+        self.assertAlmostEqual(r.fracao_validos(registros, "E01"), 724 / 730)
+"""
+
+FUNCAO_NOVA = '''
+
+def fracao_validos(registros, estacao):
+    """Fração das linhas da estação que têm medida válida (não None)."""
+    valores = [x.chuva_mm for x in registros if x.estacao == estacao]
+    return sum(v is not None for v in valores) / len(valores)
+'''
+
+pasta_tdd = copiar_projeto()
+(pasta_tdd / "tests" / "test_fracao.py").write_text(TESTE_NOVO, encoding="utf-8")
+
+print("--- 1. VERMELHO: o teste existe, a função ainda não ---")
+saida_v, codigo_v = rodar_testes(pasta_tdd)
+print(primeira_falha(saida_v).splitlines()[-1])
+print("código de saída:", codigo_v)
+
+alvo_tdd = pasta_tdd / "chuva" / "resumo.py"
+alvo_tdd.write_text(alvo_tdd.read_text(encoding="utf-8") + FUNCAO_NOVA, encoding="utf-8", newline="\n")
+
+print("\n--- 2. VERDE: escrevemos o mínimo para passar ---")
+saida_g, codigo_g = rodar_testes(pasta_tdd)
+print(saida_g.strip().splitlines()[-1], "| código de saída:", codigo_g)
+shutil.rmtree(pasta_tdd.parent, ignore_errors=True)
+```
+
+O passo vermelho importa: ele prova que o teste **consegue** falhar (um teste que passa antes de existir o código não testa nada). O passo verde é o mínimo. O terceiro passo, *refatorar* (melhorar o código com os testes de guarda), ficaria agora: por exemplo, decidir o que fazer com uma estação sem nenhuma linha (hoje, divisão por zero). Isso é um **novo teste**, e o ciclo recomeça.
+
+## A linha de comando {#sec-s2-cli}
+
+O pacote também funciona como programa, sem abrir o Python: `python -m chuva comando`. Isso usa o módulo `argparse` (que lê os argumentos digitados e monta a ajuda) e o arquivo `__main__.py`:
+
+```{python}
+def rodar_cli(*argumentos):
+    proc = subprocess.run([sys.executable, "-m", "chuva", *argumentos], cwd="projeto_chuva", capture_output=True, text=True)
+    return proc.stdout, proc.stderr, proc.returncode
+
+
+out, err, cod = rodar_cli("qualidade")
+print(out)
+print("código de saída:", cod)
+```
+
+```{python}
+out, err, cod = rodar_cli("qualidade", "arquivo_que_nao_existe.csv")
+print(err.strip())
+print("código de saída:", cod)
+```
+
+Repare que, com erro, o programa escreve a mensagem no canal de **erro** e devolve um código diferente de zero. Isso é uma convenção de todo programa de terminal, e é o que permite a outros programas (e ao GitHub) saberem que algo deu errado.
+
+## Os elementos de Python que apareceram {#sec-s2-elementos}
+
+| Elemento | Onde apareceu | Você aprofunda em |
+|:--|:--|:--|
+| tipos (`str`, `float`, `int`, `bool`, `None`) | @sec-s2-tipos | P1-01 |
+| listas, dicionários, conjuntos, compreensões | @sec-s2-colecoes | P1-02 |
+| funções, docstrings, dicas de tipo | @sec-s2-funcoes | P1-03 |
+| arquivos, `csv`, `pathlib`, `with` | @sec-s2-leitura | P1-02 e P1-08 |
+| exceções (`try`/`except`, `raise`) | @sec-s2-tipos, @sec-s2-funcoes | P1-02 |
+| `dataclass` | @sec-s2-leitura | P1-03 |
+| módulos e pacotes (`import`, `from . import`, `python -m`) | @sec-s2-cli | P1-03 |
+| testes (`unittest`, `doctest`) | @sec-s2-testes | P1-03 |
+
+## Erros clássicos {#sec-s2-erros}
+
+1. **Tratar o código de ausente como número** (`-999`): inverte médias, quebra máximos. Converta para `None` na **entrada**.
+2. **Comparar decimais com `==` depois de contas.** Veja:
+
+```{python}
+print(0.1 + 0.2 == 0.3, 0.1 + 0.2)
+```
+
+   Em testes, use `assertAlmostEqual`; em totais, arredonde ao número de casas que a medida tem (o projeto arredonda a uma casa).
+
+3. **`except:` sem tipo.** Engole erros que você não previu, e o programa segue com dado ruim.
+4. **Testar só o caminho feliz.** Os testes mais úteis são os de borda: o limiar exato (1,0 mm é dia chuvoso), a série vazia, a data que falta.
+5. **Teste que repete o código.** Se o teste calcula o esperado com a mesma fórmula do código, os dois erram juntos. Prefira exemplos feitos à mão ou uma verdade conhecida.
+6. **Mudar uma regra de limpeza e não rodar os testes.** Os resultados mudam, e os números citados no texto envelhecem.
+
+## Exercícios {#sec-s2-exercicios}
+
+**Exercício 1 (cinco números).** Usando o pacote `chuva`, descubra: (a) quantos dias com medida válida tem a estação E02; (b) quantos dias de E03 passam de 50 mm; (c) qual é o mês **completo** mais chuvoso de E03 e quanto choveu; (d) quantos pares estação-mês ficaram incompletos; (e) qual a maior chuva de um dia em E01 e quando.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 1
+```python
+s_e02 = r.serie(registros, "E02")
+a = sum(v is not None for v in s_e02.values())
+s_e03 = r.serie(registros, "E03")
+b = sum(1 for v in s_e03.values() if v is not None and v > 50)
+mensal = r.total_mensal(registros)
+completos_e03 = {k: m for k, m in mensal.items() if k[0] == "E03" and m.completo}
+c = max(completos_e03.items(), key=lambda item: item[1].total_mm)
+d_ = sum(1 for m in mensal.values() if not m.completo)
+s_e01 = r.serie(registros, "E01")
+e = max((v, dia) for dia, v in s_e01.items() if v is not None)
+print(a, b, (c[0][1], c[1].total_mm), d_, (e[0], e[1].isoformat()))
+assert (a, b, c[0][1], c[1].total_mm, d_, e[0], e[1].isoformat()) == (730, 10, "2025-01", 534.2, 7, 90.0, "2024-12-09")
+```
+Resultado: (a) **730** (731 dias, menos 1 ausente); (b) **10** dias; (c) **janeiro de 2025, 534,2 mm**; (d) **7** meses incompletos, exatamente os que contêm algum dia sem medida ou sem linha; (e) **90,0 mm em 9 de dezembro de 2024**.
+:::
+
+**Exercício 2 (teste primeiro).** Escreva a função `maior_chuva_diaria(registros, estacao)`, que devolve `(mm, data)` do dia mais chuvoso da estação (em empate, vale a data mais antiga; dias sem medida não contam). **Escreva os testes antes**, com séries pequenas feitas à mão.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 2
+```python
+import unittest
+from datetime import date, timedelta
+
+
+def maior_chuva_diaria(registros, estacao):
+    candidatos = [(x.chuva_mm, x.data) for x in registros if x.estacao == estacao and x.chuva_mm is not None]
+    if not candidatos:
+        return None, None
+    maior = max(v for v, _ in candidatos)
+    return maior, min(dia for v, dia in candidatos if v == maior)
+
+
+class MaiorChuvaDiaria(unittest.TestCase):
+    def regs(self, valores):
+        return [q.Registro("A", date(2024, 1, 1) + timedelta(days=i), v) for i, v in enumerate(valores)]
+
+    def test_basico(self):
+        self.assertEqual(maior_chuva_diaria(self.regs([1.0, 9.5, 3.0]), "A"), (9.5, date(2024, 1, 2)))
+
+    def test_empate_vale_a_data_mais_antiga(self):
+        self.assertEqual(maior_chuva_diaria(self.regs([5.0, 2.0, 5.0]), "A"), (5.0, date(2024, 1, 1)))
+
+    def test_none_nao_conta(self):
+        self.assertEqual(maior_chuva_diaria(self.regs([None, 2.0]), "A"), (2.0, date(2024, 1, 2)))
+
+    def test_estacao_sem_medida(self):
+        self.assertEqual(maior_chuva_diaria(self.regs([None]), "A"), (None, None))
+        self.assertEqual(maior_chuva_diaria(self.regs([1.0]), "B"), (None, None))
+
+
+suite = unittest.defaultTestLoader.loadTestsFromTestCase(MaiorChuvaDiaria)
+resultado = unittest.TextTestRunner(verbosity=0).run(suite)
+assert resultado.wasSuccessful()
+reais = {est: maior_chuva_diaria(registros, est) for est in ("E01", "E02", "E03", "E04")}
+print({k: (v[0], v[1].isoformat()) for k, v in reais.items()})
+assert reais == {"E01": (90.0, date(2024, 12, 9)), "E02": (57.3, date(2025, 11, 22)), "E03": (150.6, date(2025, 1, 1)), "E04": (58.9, date(2024, 3, 2))}
+```
+Resultado: os quatro testes passam e os valores reais são E01 **90,0 mm** (9/12/2024), E02 **57,3 mm** (22/11/2025), E03 **150,6 mm** (1/1/2025) e E04 **58,9 mm** (2/3/2024). Na Semana 4, você vai calcular o mesmo número em SQL e comparar. Note os casos de borda que os testes cobrem: empate, `None` e estação sem medida.
+:::
+
+**Exercício 3 (um código novo).** O fornecedor avisa que, a partir de agora, usará também `-99.9` para "sem medida". Hoje, o que `interpretar_valor("-99.9")` devolve? Faça a mudança de uma linha que o trata como código de ausente e prove, com `assert`, que o resultado agora é `(None, 'codigo')` e que `-3.2` continua sendo `(None, 'negativo')`.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 3
+```python
+antes = q.interpretar_valor("-99.9")
+original = q.CODIGOS_AUSENTE
+q.CODIGOS_AUSENTE = original | frozenset({"-99.9"})        # no projeto real, você edita a constante no arquivo
+try:
+    depois = q.interpretar_valor("-99.9")
+    outro_negativo = q.interpretar_valor("-3.2")
+finally:
+    q.CODIGOS_AUSENTE = original                           # devolve o estado, para os outros blocos
+print(antes, depois, outro_negativo)
+assert antes == (None, "negativo") and depois == (None, "codigo") and outro_negativo == (None, "negativo")
+```
+Resultado: antes, `-99.9` caía em `'negativo'` (era descartado, mas contado na categoria errada do relatório); depois, vira `'codigo'`. A mudança é **uma linha** porque a regra mora numa constante com nome. É o benefício de decisões explícitas. No projeto real você também adicionaria `"-99.9"` ao teste `test_ausentes_e_descartados`.
+:::
+
+**Desafio (sensor travado).** Um defeito comum de pluviômetro é repetir o mesmo valor positivo dia após dia. Escreva `sequencias_repetidas(serie, minimo=3)`, que devolve a lista de `(data_inicial, comprimento)` das sequências de pelo menos `minimo` dias **consecutivos** com o **mesmo valor positivo**. Teste em séries pequenas, aplique aos dados reais e depois **plante um defeito** em uma cópia da série para ver se ele é detectado.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do desafio
+```python
+from datetime import date, timedelta
+
+
+def sequencias_repetidas(s, minimo=3):
+    achadas, inicio, tamanho, anterior = [], None, 0, None
+    for dia in sorted(s):
+        v = s[dia]
+        continua = tamanho > 0 and anterior is not None and (dia - anterior).days == 1 and v == s[anterior]
+        if v is not None and v > 0 and continua:
+            tamanho += 1
+        else:
+            if tamanho >= minimo:
+                achadas.append((inicio, tamanho))
+            inicio, tamanho = (dia, 1) if (v is not None and v > 0) else (None, 0)
+        anterior = dia
+    if tamanho >= minimo:
+        achadas.append((inicio, tamanho))
+    return achadas
+
+
+d0 = date(2024, 1, 1)
+mini = {d0 + timedelta(days=i): v for i, v in enumerate([2.0, 2.0, 2.0, 0.0, 0.0, 0.0, 5.0, 5.0, None, 5.0, 5.0, 5.0, 5.0])}
+assert sequencias_repetidas(mini) == [(d0, 3), (d0 + timedelta(days=9), 4)]   # zeros e None não contam; None quebra
+
+reais_repetidas = {est: sequencias_repetidas(r.serie(registros, est)) for est in ("E01", "E02", "E03", "E04")}
+assert all(v == [] for v in reais_repetidas.values())      # nos dados oficiais não há sensor travado
+
+copia = dict(r.serie(registros, "E02"))
+inicio_plantado = date(2025, 3, 1)
+for k in range(7):
+    copia[inicio_plantado + timedelta(days=k)] = 5.0       # planta 7 dias iguais
+assert sequencias_repetidas(copia) == [(inicio_plantado, 7)]
+print(reais_repetidas, sequencias_repetidas(copia))
+```
+Resultado: nos dados oficiais, **nenhuma** sequência de 3 ou mais valores iguais e positivos; com 7 dias de `5.0` plantados em E02, a função devolve exatamente `(2025-03-01, 7)`. Os zeros ficam de fora de propósito: muitos dias seguidos de 0,0 são normais, e repetir o mesmo valor **positivo** é o que denuncia o aparelho. Aqui você usou **a mesma ideia** do capítulo: plantar o defeito para saber se o detector funciona.
+:::
+
+## Entregável da semana {#sec-s2-entregavel}
+
+No **seu repositório de treino** (`chuva-estacoes`), em um branch ou direto na `main`, com commits pequenos:
+
+1. crie a pasta `dados/` e copie para ela `estacoes.csv`, `chuva_diaria.csv` e `SHA256SUMS` do livro (a pasta `projeto_chuva/dados/`); copie também o `.gitattributes` do livro. **Commit:** "Adiciona dados oficiais e SHA256SUMS";
+2. crie `chuva/__init__.py` e `chuva/qualidade.py`. **Digite você mesmo** a função `interpretar_valor` (30 minutos bem gastos); o restante do arquivo pode ser copiado depois de lido com atenção. **Commit:** "Adiciona interpretar_valor com doctests";
+3. crie `tests/test_qualidade.py` com pelo menos os testes da classe `InterpretarValor`, digitados por você. Rode `python -m unittest discover -s tests -v`. **Commit:** "Testa interpretar_valor";
+4. copie o restante de `qualidade.py` e dos testes, rode tudo e confirme o **zero erros** da @sec-s2-verdade. **Commit:** "Adiciona leitura do CSV e testes contra a verdade";
+5. `git push`, e confira a história no GitHub.
+
+Registre no Notion o *Nível atual* e o que você precisou consultar.
+
+## Autoavaliação {#sec-s2-autoavaliacao}
+
+| Nível | Você consegue... |
+|:--|:--|
+| **1 · Reconheço** | Dizer o tipo de um valor (`str`, `float`, `None`...); ler um teste `unittest` e dizer o que ele afirma; reconhecer o código de saída 0 como sucesso. |
+| **2 · Explico** | Explicar por que `None` não é zero e por que `-999` não pode ser número; por que o teste de verdade conhecida vale mais que um exemplo isolado; o que é um teste de mutação. |
+| **3 · Executo** | Escrever uma função pura nova com os testes **antes**, ver o teste falhar, fazer passar, e rodar a suíte inteira. |
+| **4 · Ensino** | Montar uma aula de 40 min que parta de um CSV sujo, plante defeitos conhecidos e deixe os alunos escreverem a limpeza guiados pelos testes. |
+
+## Para ir além {#sec-s2-alem}
+
+* **`pytest`:** o executor de testes mais usado no mundo Python. Ele também roda os testes `unittest` deste projeto sem alteração e permite escrever com `assert` simples. Será apresentado no módulo P1-03. (Neste livro, os testes foram rodados com `unittest`; o `pytest` não foi executado.)
+* **Cobertura de testes:** o pacote `coverage` mostra quais linhas o seu código executou durante os testes, para você achar o que nunca foi testado.
+* **pandas:** em P1-05, os mesmos cálculos virarão operações sobre tabelas. Você vai poder conferi-los contra este projeto.

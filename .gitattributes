@@ -1,0 +1,9 @@
+# Terminações de linha: texto sempre com LF dentro do repositório, em qualquer sistema.
+# Sem isso, o Windows pode converter para CRLF e a soma de verificação dos dados (SHA256SUMS) muda.
+* text=auto
+*.csv text eol=lf
+*.sql text eol=lf
+*.py  text eol=lf
+*.qmd text eol=lf
+*.md  text eol=lf
+*.yml text eol=lf

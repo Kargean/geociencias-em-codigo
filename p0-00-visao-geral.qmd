@@ -1,0 +1,85 @@
+# Módulo P0-00: um projeto do início ao fim {#sec-p000}
+
+::: {.callout-note icon=false}
+## Neste módulo
+
+**Pergunta que guia tudo:** como guardar, ver, gerenciar e testar um projeto de dados de modo que você, outras pessoas e até você mesmo daqui a um ano possam confiar nele?
+
+**Você vai ser capaz de:**
+
+1. usar **Git** no computador (guardar versões, ver o que mudou, desfazer com segurança) e **GitHub** na nuvem (enviar, sincronizar dois computadores, abrir pull requests e issues, acompanhar o histórico);
+2. fazer o GitHub **testar o seu código sozinho** a cada mudança (GitHub Actions) e ler o resultado;
+3. escrever **Python** de verdade: tipos de dados, funções, arquivos, exceções e módulos, aplicados a um CSV com defeitos;
+4. escrever **SQL** de verdade: modelar tabelas, restrições, consultas, janelas, e entender o que o `NULL` faz com as suas contas;
+5. escrever **testes** que provam que o código faz o que se diz, inclusive um teste que compara dois caminhos de cálculo (Python e SQL);
+6. manter o material vivo: registrar mudanças, corrigir erros e evoluir o roteiro sem perder o fio.
+
+**Pré-requisitos:** nenhum conhecimento de programação. Você precisa de um computador onde possa instalar programas e de uma conta no GitHub.
+
+**Tempo sugerido:** 4 semanas, cerca de 3 h por semana. Cada semana tem um capítulo.
+:::
+
+## O projeto: chuva em quatro estações {#sec-projeto}
+
+Todo o módulo gira em torno de **um** projeto pequeno. Você recebe um arquivo de chuva diária de quatro estações (**fictícias**), com os defeitos que arquivos de verdade têm: ausências escritas como `-999`, células vazias, vírgula decimal, linhas repetidas, dias sem linha, valores impossíveis. A tarefa é:
+
+1. ler o arquivo e limpá-lo com regras explícitas;
+2. calcular índices usados em climatologia (total mensal, dias de chuva, maior período seco, maior chuva em 5 dias);
+3. guardar tudo num banco de dados e calcular os mesmos números em SQL;
+4. provar, com testes, que as contas estão certas;
+5. fazer tudo isso dentro do Git e do GitHub, com testes automáticos.
+
+Os dados são **sintéticos de propósito**: como nós plantamos cada defeito em um lugar conhecido, os testes conseguem dizer se a limpeza funciona. Com dados reais, você nunca saberia onde estava o erro. É a primeira aplicação da regra do livro: *dados sintéticos primeiro*.
+
+## Dois repositórios, duas pastas {#sec-dois-repos}
+
+| O quê | Para quê | Quem mexe |
+|:--|:--|:--|
+| Repositório do **livro** (`geociencias-em-codigo`) | guarda os capítulos e a solução de referência na pasta `projeto_chuva/` | principalmente o Claude e você, via pull requests |
+| Seu repositório de **treino** (`chuva-estacoes`) | onde **você digita** cada passo do módulo | só você |
+
+A regra é simples: digite no seu repositório de treino; quando travar, compare com `projeto_chuva/` no livro. Errar no repositório de treino é grátis, e é o melhor jeito de aprender Git.
+
+## O mapa das quatro semanas {#sec-mapa-semanas}
+
+| Semana | Tema | Entregável no seu repositório de treino |
+|:--|:--|:--|
+| 1 | **Git**: a história do projeto, ver o que mudou, desfazer, enviar ao GitHub | repositório criado, 5 commits com boas mensagens, uma tag, tudo enviado |
+| 2 | **Python e testes**: ler e limpar o CSV, testar | `qualidade.py` com testes passando e commitados |
+| 3 | **GitHub**: branches, pull requests, issues, testes automáticos, proteção da `main` | um issue, um pull request com testes verdes, o selo de testes no README |
+| 4 | **SQL e o ciclo completo**: banco, consultas, Python contra SQL, versão e histórico de mudanças | consultas SQL, teste de consistência, tag `v0.1.0` com release |
+
+## Instalar e conferir {#sec-instalar}
+
+Você precisa de quatro coisas. Confira cada uma no **terminal** (no Windows, o *Git Bash* que vem com o Git, ou o PowerShell; no macOS e no Linux, o Terminal):
+
+```bash
+git --version        # esperado: git version 2.x
+python --version     # esperado: Python 3.11 ou mais novo
+code --version       # opcional: VS Code, um editor gratuito com painel de Git
+gh --version         # opcional, recomendado: a ferramenta de linha de comando do GitHub
+```
+
+* **Git:** git-scm.com. No Windows, o instalador já traz o Git Bash e o *Git Credential Manager*, que guarda o seu login.
+* **Python:** python.org, ou o gerenciador da sua distribuição. Em alguns sistemas o comando é `python3` ou, no Windows, `py`. Neste módulo escrevemos `python`; use o que funcionar na sua máquina.
+* **Editor:** qualquer editor de texto serve; o VS Code facilita porque mostra o Git ao lado do código.
+* **GitHub CLI (`gh`):** cli.github.com. Ela faz o login e permite criar repositórios, issues e pull requests sem sair do terminal. Tudo que ela faz também dá para fazer no site; usamos os dois.
+
+Nada deste módulo exige instalar pacotes Python: o projeto usa só a biblioteca padrão. Isso é de propósito, para você aprender os fundamentos sem depender de instalações.
+
+## Como ler as saídas do Git neste módulo {#sec-saidas}
+
+Os capítulos mostram comandos do Git com a saída **real**, gerada por um **laboratório descartável**: um programa que cria repositórios numa pasta temporária, roda os comandos de verdade e imprime tudo como se fosse o terminal. Duas observações para você não estranhar:
+
+* o laboratório troca o endereço do GitHub por uma pasta local, e na exibição troca de volta; por isso aparecem endereços como `https://github.com/seu-usuario/chuva-estacoes.git`, que **são os que você usaria**. Em nenhum momento um comando do livro toca o GitHub de verdade;
+* a saída está em **inglês** (o laboratório força isso para ficar igual em qualquer máquina). Se o seu Git estiver traduzido, as mensagens virão em português, mas os comandos e o significado são os mesmos.
+
+Uma linha que começa com `$` é um comando; as linhas seguintes são o que o terminal respondeu. Uma linha `# (no editor) arquivo` mostra o conteúdo gravado num arquivo, como se você o tivesse editado.
+
+## Como este módulo evolui {#sec-evolui}
+
+O módulo foi feito para ser **corrigido e melhorado ao longo do tempo**, com o mesmo processo que ele ensina: cada erro ou ideia vira um *issue*; cada mudança vira um *pull request* com testes verdes; cada versão fica registrada no `CHANGELOG.md`. A Semana 4 (@sec-ciclo) descreve o ritual de 15 minutos por semana que mantém isso funcionando, e o arquivo `CLAUDE.md` na raiz do repositório guarda as regras para que as próximas sessões de trabalho com o Claude continuem do ponto onde você parou.
+
+## Como pedir ajuda {#sec-ajuda}
+
+Quando algo der errado, a ajuda mais rápida precisa de **três coisas**: (1) o comando que você digitou, exatamente; (2) a mensagem de erro **completa**, copiada, não resumida; (3) o que você esperava que acontecesse. Com isso, quase todo problema de Git ou de Python se resolve em uma ou duas trocas.

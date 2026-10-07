@@ -1,0 +1,12 @@
+_book/
+.quarto/
+_freeze/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.jupyter_cache/
+.venv/
+.DS_Store
+*.db
+*.sqlite
+.vscode/

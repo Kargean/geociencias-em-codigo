@@ -1,0 +1,629 @@
+# Atitudes e projeção estereográfica {#sec-estrutural-atitudes}
+
+::: {.callout-note icon=false}
+## Neste capítulo
+
+**Pergunta que guia tudo:** dadas 60 medidas de acamamento numa região dobrada, onde está o eixo da dobra, e quanto podemos confiar nesse resultado?
+
+**Você vai ser capaz de:**
+
+1. transformar *direção/mergulho* em vetores e vetores em pontos e curvas numa rede estereográfica;
+2. explicar por que se usa a rede de **igual área** (Schmidt) para contar e contornar dados;
+3. estimar o eixo de uma dobra com o **tensor de orientação** (autovetores) e medir o erro do método;
+4. reconhecer os três erros clássicos: convenção trocada, rede errada e média errada.
+
+**Pré-requisitos:** noções de geologia estrutural (plano, direção, mergulho). Em Python, apenas variáveis e listas; o resto é explicado aqui, inclusive o NumPy mínimo.
+
+**Tempo sugerido:** 3 h por semana, em quatro sessões: (1) da @sec-fenomeno à @sec-vetor; (2) @sec-projecao; (3) @sec-eixo; (4) da @sec-experimento à @sec-exercicios.
+
+**Dados:** *sintéticos* (inventados com um gerador que está no repositório). A vantagem: o eixo verdadeiro é conhecido, então dá para medir o erro.
+:::
+
+## O fenômeno: uma dobra descrita por números {#sec-fenomeno}
+
+Imagine uma região onde as camadas estão dobradas. No campo você mediu, em 60 pontos, a *direção* e o *mergulho* do acamamento. Cada medida é um par de números. O que dá para fazer com 60 pares de números? Muito: eles contêm a **geometria da dobra**, e o objetivo do capítulo é extraí-la.
+
+```{python}
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from geocodigo import estrutural as est
+from geocodigo import graficos as gr
+
+plt.rcParams.update({"figure.dpi": 110, "axes.titlesize": 11})
+
+df = pd.read_csv("dados/dobra_sintetica.csv")
+print(df.shape)
+df.head(8)
+```
+
+Cada linha é uma medida: `direcao` (*strike*, de 0 a 360°) e `mergulho` (*dip*, de 0 a 90°). Repare que as direções variam de 0° a 358°: se as camadas formassem um único plano, todas as medidas seriam parecidas. O que há de estruturado nesses números? Só uma figura mostra, e para desenhá-la precisamos primeiro combinar o que cada número significa.
+
+## Do campo ao número: direção e mergulho {#sec-direcao-mergulho}
+
+Um plano geológico é descrito por dois ângulos. A **direção** (*strike*) é o azimute da linha horizontal contida no plano. O **mergulho** (*dip*) é o ângulo entre o plano e a horizontal, medido na linha de maior declive. A **direção de mergulho** (*dip direction*) é o azimute para onde essa linha desce.
+
+```{python}
+#| label: fig-bloco
+#| fig-cap: "Plano 120/40 (direção 120°, mergulho 40°). Preto: linha de direção, horizontal. Vermelho: linha de maior declive, que desce para a direção de mergulho (210°, SW). Azul: normal ao plano. Convenção: regra da mão direita."
+fig = plt.figure(figsize=(5.2, 4.4))
+ax = fig.add_subplot(projection="3d")
+gr.bloco_plano(ax, 120, 40)
+ax.legend(loc="upper left", fontsize=7)
+plt.show()
+```
+
+**A convenção deste livro é a regra da mão direita:** olhando ao longo da direção, o plano mergulha **para a sua direita**. Assim, `direção de mergulho = direção + 90°`. Na @fig-bloco: direção 120° (apontando para SE), mergulho 40° para a direita de quem olha para SE, isto é, para 210° (SW).
+
+Há outras notações no mercado, e elas convivem em dados reais. A @tbl-notacoes mostra o mesmo plano de três formas.
+
+| Notação | Exemplo | Como ler |
+|:--|:--|:--|
+| Direção/mergulho (mão direita) | `120/40` | direção 120°, mergulho 40° para a direita |
+| Direção de mergulho/mergulho | `210/40` | mergulha para 210° com 40° |
+| Rumo/mergulho (quadrante) | `S60E/40SW` | rumo S60°E (= azimute 120°), mergulha 40° para SW |
+
+: O mesmo plano em três notações. {#tbl-notacoes}
+
+### Erro clássico nº 1: a convenção trocada
+
+Os mesmos dois números, lidos com convenções diferentes, descrevem planos diferentes. Vamos medir quão diferentes:
+
+```{python}
+# "120/40" lido como DIREÇÃO/mergulho   -> direção 120, direção de mergulho 210
+# "120/40" lido como DIREÇÃO DE MERGULHO/mergulho -> direção 120 - 90 = 30
+n_a = est.normal_do_plano(120, 40)
+n_b = est.normal_do_plano(30, 40)
+angulo = np.degrees(np.arccos(n_a @ n_b))
+print(f"Os dois planos formam {angulo:.1f}° entre si.")
+```
+
+Uma troca silenciosa de convenção produz planos separados por **54°**, e nenhum erro aparece: o código roda, o gráfico sai. Por isso o primeiro hábito do livro é: **antes de qualquer cálculo, anote a convenção dos seus dados**, e teste com um plano cuja resposta você sabe de cabeça.
+
+## Do número ao vetor {#sec-vetor}
+
+Para calcular com planos, trocamos os ângulos por vetores. Usamos o sistema $(N, E, D)$: Norte, Leste e **Baixo** (para dentro da Terra). O vetor que resume um plano é a sua **normal**, que aponta para baixo. Ela é o produto vetorial entre o vetor da direção $\mathbf{s}$ e o da linha de maior declive $\mathbf{d}$ (a regra da mão direita aparece de novo):
+
+$$
+\mathbf{n} = \mathbf{s}\times\mathbf{d} =
+\begin{pmatrix} -\sin\delta\,\cos\alpha \\ -\sin\delta\,\sin\alpha \\ \cos\delta \end{pmatrix},
+\qquad \alpha = \text{direção} + 90^\circ,\quad \delta = \text{mergulho}
+$$ {#eq-normal}
+
+Isto está programado em `est.normal_do_plano`. Em vez de confiar, verificamos duas coisas que a @eq-normal promete: `n` é ortogonal ao plano (o produto escalar com os dois vetores contidos nele dá zero) e é igual ao produto vetorial.
+
+```{python}
+direcao, mergulho = 120, 40
+s = np.radians(direcao)
+a = np.radians(direcao + 90)
+d = np.radians(mergulho)
+
+v_dir = np.array([np.cos(s), np.sin(s), 0.0])                                   # ao longo da direção
+v_mer = np.array([np.cos(d)*np.cos(a), np.cos(d)*np.sin(a), np.sin(d)])         # linha de maior declive
+
+n = est.normal_do_plano(direcao, mergulho)
+print("normal n            =", n.round(4))
+print("n · v_dir, n · v_mer =", round(float(n @ v_dir), 12) + 0.0, round(float(n @ v_mer), 12) + 0.0)
+print("v_dir × v_mer       =", np.cross(v_dir, v_mer).round(4))
+print("|n|                 =", round(float(np.linalg.norm(n)), 12))
+```
+
+> **NumPy mínimo usado acima.** `np.radians` converte graus em radianos (as funções trigonométricas do NumPy trabalham em radianos). `np.array([...])` cria um vetor. `@` é o produto escalar. `np.cross` é o produto vetorial.
+
+O **polo** do plano é o ponto onde a normal fura o hemisfério inferior. Em termos de linha, ele tem *trend* = direção de mergulho + 180° e *plunge* = 90° − mergulho (para 120/40: trend 30°, plunge 50°). A função `est.linha_do_vetor` devolve exatamente isso:
+
+```{python}
+trend, plunge = est.linha_do_vetor(n)
+print(f"polo de 120/40: trend {trend:.0f}°, plunge {plunge:.0f}°")
+```
+
+## Do vetor ao desenho: a projeção estereográfica {#sec-projecao}
+
+Uma normal é um ponto na superfície de uma esfera. Para desenhar na tela, usamos só o **hemisfério inferior** (as direções que apontam para baixo) e o achatamos num disco. Existem muitas formas de achatar; as duas clássicas são:
+
+* **Wulff (igual ângulo, ou estereográfica):** mantém os ângulos, mas deforma as áreas.
+* **Schmidt (igual área, ou de Lambert):** mantém as áreas, mas deforma levemente os ângulos.
+
+### Dedução da projeção de igual área
+
+Seja $\theta$ o ângulo entre o vetor e a vertical, de modo que $D=\cos\theta$. A calota esférica até $\theta$ tem área proporcional a $1-\cos\theta = 1-D$, e a fração do hemisfério dentro dessa calota é exatamente $1-D$. Se queremos que a área seja conservada num disco de raio 1, a fração do disco dentro do raio $r$ (que é $r^2$) tem de ser igual a essa fração:
+
+$$ r^2 = 1 - D \quad\Rightarrow\quad r = \sqrt{1-D} \;=\; \sqrt{2}\,\sin(\theta/2) $$ {#eq-r-schmidt}
+
+A parte horizontal do vetor, $(E, N)$, tem módulo $\sin\theta = \sqrt{(1-D)(1+D)}$. Ajustando esse módulo para $r$ obtém-se a fórmula usada no código:
+
+$$ (x, y) = \frac{(E,\,N)}{\sqrt{1+D}} \qquad\text{(Schmidt)} \qquad\qquad (x, y) = \frac{(E,\,N)}{1+D} \qquad\text{(Wulff)} $$ {#eq-xy}
+
+Com $x$ para Leste e $y$ para Norte. Dois casos de conferência: uma linha vertical ($D=1$) cai no centro; uma linha horizontal ($D=0$) cai exatamente no círculo primitivo, de raio 1. Um **plano** vira uma curva (o *grande círculo*, seu traço no hemisfério) e seu **polo** vira um ponto.
+
+### A primeira rede, peça por peça
+
+```{python}
+#| label: fig-rede
+#| fig-cap: "Rede de igual área com três planos e seus polos. Planos suaves (0/30) têm polos perto do centro e curvas próximas da borda; planos íngremes (250/75) têm o contrário."
+fig, ax = plt.subplots(figsize=(5.2, 5.2))
+gr.rede(ax, "schmidt")                      # círculo primitivo, meridianos e paralelos
+for dd, mm, cor in [(0, 30, "C0"), (120, 40, "C3"), (250, 75, "C2")]:
+    gr.plano_e_polo(ax, dd, mm, cor=cor, rotulo=f"{dd}/{mm}")
+ax.legend(loc="lower left", fontsize=8, frameon=False)
+plt.show()
+```
+
+Como ler a @fig-rede: cada curva colorida é a *trajetória* do plano no hemisfério inferior; cada ponto é a normal do plano com a mesma cor. Quanto **mais íngreme** o plano, mais o polo se afasta do centro (plano vertical ⇒ polo no círculo primitivo). A curva sempre toca o círculo primitivo em dois pontos opostos: são as duas pontas da **linha de direção**, em azimutes 120° e 300° para o plano 120/40.
+
+### Experimente (figura interativa)
+
+Mexa nos controles e observe: (1) onde fica o polo quando o mergulho vai de 1° a 89°; (2) o que acontece com a curva quando você gira a direção; (3) o que muda quando a projeção passa de Schmidt para Wulff. Use **Fixar este plano** para comparar vários planos de uma vez.
+
+```{=html}
+<div class="est-widget" id="est-widget">
+<style>
+.est-widget{--est-fg:currentColor;border:1px solid rgba(128,128,128,.35);border-radius:10px;padding:12px;margin:1rem 0;font-size:.95rem}
+.est-grid{display:grid;grid-template-columns:minmax(260px,460px) minmax(220px,1fr);gap:16px;align-items:start}
+@media (max-width:640px){.est-grid{grid-template-columns:1fr}}
+.est-widget canvas{width:100%;max-width:460px;height:auto;aspect-ratio:1/1;display:block;margin:auto}
+.est-widget label{display:block;margin:.4rem 0 .1rem;font-weight:600}
+.est-widget input[type=range]{width:100%}
+.est-widget select,.est-widget button{font:inherit;padding:.25rem .5rem;margin:.25rem .25rem .25rem 0}
+.est-widget table{border-collapse:collapse;margin-top:.6rem;width:100%}
+.est-widget td{padding:.2rem .4rem;border-top:1px solid rgba(128,128,128,.3);vertical-align:top}
+.est-widget td:first-child{opacity:.75}
+.est-nota{opacity:.75;font-size:.85rem;margin-top:.5rem}
+</style>
+<div class="est-grid">
+  <canvas id="est-canvas" width="920" height="920" role="img" aria-label="Estereograma do hemisfério inferior com o plano escolhido"></canvas>
+  <div>
+    <label for="est-dir">Direção (strike, regra da mão direita): <output id="est-o-dir">120</output>°</label>
+    <input type="range" id="est-dir" min="0" max="359" step="1" value="120">
+    <label for="est-mer">Mergulho (dip): <output id="est-o-mer">40</output>°</label>
+    <input type="range" id="est-mer" min="1" max="89" step="1" value="40">
+    <label for="est-tipo">Projeção</label>
+    <select id="est-tipo">
+      <option value="schmidt">Schmidt (igual área)</option>
+      <option value="wulff">Wulff (igual ângulo)</option>
+    </select>
+    <div>
+      <button type="button" id="est-fixar">Fixar este plano</button>
+      <button type="button" id="est-limpar">Limpar fixados</button>
+    </div>
+    <table>
+      <tr><td>Atitude (direção/mergulho)</td><td id="est-r-att"></td></tr>
+      <tr><td>Mergulha para</td><td id="est-r-dd"></td></tr>
+      <tr><td>Polo (trend / plunge)</td><td id="est-r-polo"></td></tr>
+      <tr><td>Polo na rede (x, y)</td><td id="est-r-xy"></td></tr>
+    </table>
+    <p class="est-nota">Linha vermelha: grande círculo do plano. Ponto vermelho: seu polo. Em cinza: planos fixados.
+    Rede de 10° em 10°; N no alto, E à direita.</p>
+  </div>
+</div>
+<script>
+(function () {
+  var rad = function (d) { return d * Math.PI / 180; };
+  var deg = function (r) { return r * 180 / Math.PI; };
+  var mod = function (a, m) { return ((a % m) + m) % m; };
+
+  // vetores em (N, E, Baixo) — mesmas fórmulas de geocodigo.estrutural
+  function normal(direcao, mergulho) {
+    var az = rad(direcao + 90), d = rad(mergulho);
+    return [-Math.sin(d) * Math.cos(az), -Math.sin(d) * Math.sin(az), Math.cos(d)];
+  }
+  function proj(v, tipo) {
+    if (v[2] < 0) v = [-v[0], -v[1], -v[2]];
+    var k = tipo === 'wulff' ? 1 / (1 + v[2]) : 1 / Math.sqrt(1 + v[2]);
+    return [v[1] * k, v[0] * k];                       // x = Leste, y = Norte
+  }
+  function circulo(direcao, mergulho, n) {
+    var s = rad(direcao), az = rad(direcao + 90), d = rad(mergulho), pts = [];
+    var vd = [Math.cos(s), Math.sin(s), 0];
+    var vm = [Math.cos(d) * Math.cos(az), Math.cos(d) * Math.sin(az), Math.sin(d)];
+    for (var i = 0; i < n; i++) {
+      var f = Math.PI * i / (n - 1), c = Math.cos(f), sn = Math.sin(f);
+      pts.push([c * vd[0] + sn * vm[0], c * vd[1] + sn * vm[1], c * vd[2] + sn * vm[2]]);
+    }
+    return pts;
+  }
+
+  var cv = document.getElementById('est-canvas'), ctx = cv.getContext('2d');
+  var W = cv.width, R = W * 0.42, CX = W / 2, CY = W / 2;
+  var el = function (id) { return document.getElementById(id); };
+  var estado = { dir: 120, mer: 40, tipo: 'schmidt', fixos: [] };
+
+  function px(p) { return [CX + R * p[0], CY - R * p[1]]; }
+  function linha(vs, tipo, cor, lw) {
+    ctx.beginPath();
+    for (var i = 0; i < vs.length; i++) {
+      var q = px(proj(vs[i], tipo));
+      if (i === 0) ctx.moveTo(q[0], q[1]); else ctx.lineTo(q[0], q[1]);
+    }
+    ctx.strokeStyle = cor; ctx.lineWidth = lw; ctx.stroke();
+  }
+  function ponto(v, tipo, cor) {
+    var q = px(proj(v, tipo));
+    ctx.beginPath(); ctx.arc(q[0], q[1], 9, 0, 2 * Math.PI);
+    ctx.fillStyle = cor; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5; ctx.stroke();
+  }
+  function rede(tipo) {
+    var cinza = 'rgba(128,128,128,0.45)', i, k, a, v, f, pts;
+    for (var dip = 10; dip < 90; dip += 10) {
+      linha(circulo(0, dip, 91), tipo, cinza, 1.2);
+      linha(circulo(180, dip, 91), tipo, cinza, 1.2);
+    }
+    linha([[1, 0, 0], [-1, 0, 0]], tipo, cinza, 1.2); // N-S vertical
+    for (a = 10; a < 180; a += 10) {
+      pts = [];
+      for (i = 0; i <= 90; i++) {
+        f = Math.PI * i / 90;
+        pts.push([Math.cos(rad(a)), Math.sin(rad(a)) * Math.cos(f), Math.sin(rad(a)) * Math.sin(f)]);
+      }
+      linha(pts, tipo, cinza, 1.2);
+    }
+    var cor = getComputedStyle(cv).color || '#222';
+    ctx.beginPath(); ctx.arc(CX, CY, R, 0, 2 * Math.PI); ctx.strokeStyle = cor; ctx.lineWidth = 3; ctx.stroke();
+    ctx.fillStyle = cor; ctx.font = '34px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('N', CX, CY - R - 34); ctx.fillText('S', CX, CY + R + 34);
+    ctx.fillText('E', CX + R + 34, CY); ctx.fillText('W', CX - R - 34, CY);
+    ctx.fillRect(CX - 8, CY - 1.5, 16, 3); ctx.fillRect(CX - 1.5, CY - 8, 3, 16);
+  }
+  var PT = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  function desenhar() {
+    ctx.clearRect(0, 0, W, W);
+    rede(estado.tipo);
+    estado.fixos.forEach(function (f) {
+      linha(circulo(f[0], f[1], 181), estado.tipo, 'rgba(110,110,110,0.9)', 2);
+      ponto(normal(f[0], f[1]), estado.tipo, 'rgba(150,150,150,0.9)');
+    });
+    linha(circulo(estado.dir, estado.mer, 181), estado.tipo, '#d62728', 4);
+    ponto(normal(estado.dir, estado.mer), estado.tipo, '#d62728');
+    var dd = mod(estado.dir + 90, 360), tr = mod(dd + 180, 360), pl = 90 - estado.mer;
+    var xy = proj(normal(estado.dir, estado.mer), estado.tipo);
+    el('est-o-dir').textContent = estado.dir; el('est-o-mer').textContent = estado.mer;
+    el('est-r-att').textContent = estado.dir + '/' + estado.mer;
+    el('est-r-dd').textContent = dd + '° (' + PT[Math.round(dd / 45) % 8] + ')';
+    el('est-r-polo').textContent = tr + '° / ' + pl + '°';
+    el('est-r-xy').textContent = '(' + xy[0].toFixed(3) + ', ' + xy[1].toFixed(3) + ')';
+    cv.setAttribute('aria-label', 'Estereograma ' + (estado.tipo === 'wulff' ? 'de igual ângulo' : 'de igual área') +
+      ': plano ' + estado.dir + '/' + estado.mer + ', mergulha para ' + dd + ' graus; polo com trend ' + tr + ' e plunge ' + pl);
+  }
+  el('est-dir').addEventListener('input', function (e) { estado.dir = +e.target.value; desenhar(); });
+  el('est-mer').addEventListener('input', function (e) { estado.mer = +e.target.value; desenhar(); });
+  el('est-tipo').addEventListener('change', function (e) { estado.tipo = e.target.value; desenhar(); });
+  el('est-fixar').addEventListener('click', function () {
+    if (estado.fixos.length >= 6) estado.fixos.shift();
+    estado.fixos.push([estado.dir, estado.mer]); desenhar();
+  });
+  el('est-limpar').addEventListener('click', function () { estado.fixos = []; desenhar(); });
+  window.estereoWidget = { normal: normal, proj: proj, circulo: circulo, estado: estado, desenhar: desenhar };
+  desenhar();
+})();
+</script>
+</div>
+```
+
+### Por que igual área? Um teste que você mesmo pode repetir
+
+Gerar direções **uniformemente distribuídas** no hemisfério (sem preferência por nenhuma orientação) é fácil: sorteia-se um vetor com distribuição normal em 3D, normaliza-se e inverte-se o que apontar para cima. Se a projeção conserva áreas, esses pontos devem aparecer **uniformes** no disco.
+
+```{python}
+#| label: fig-area
+#| fig-cap: "3 000 direções sorteadas uniformemente no hemisfério. Em Schmidt, os pontos se espalham de forma homogênea; em Wulff, amontoam-se no centro e rarefazem-se na borda."
+rng = np.random.default_rng(1)
+v = rng.normal(size=(3000, 3))
+v = est.para_baixo(v / np.linalg.norm(v, axis=1, keepdims=True))
+
+fig, axs = plt.subplots(1, 2, figsize=(9, 4.4))
+for ax, tipo, f in zip(axs, ("schmidt", "wulff"), (est.schmidt, est.wulff)):
+    gr.rede(ax, tipo, cor="0.88", rotulos=False)
+    ax.plot(*f(v).T, ".", ms=2.5, color="C0")
+    ax.set_title({"schmidt": "Schmidt (igual área)", "wulff": "Wulff (igual ângulo)"}[tipo])
+plt.show()
+```
+
+Quantificando: medimos a densidade de pontos por unidade de área do disco, dividida pela densidade ideal (uniforme = 1), no centro (raio < 0,1) e na borda (0,95 < raio < 1):
+
+```{python}
+rng = np.random.default_rng(2)
+V = rng.normal(size=(400_000, 3))
+V = est.para_baixo(V / np.linalg.norm(V, axis=1, keepdims=True))
+
+linhas = []
+for nome, f in (("Schmidt", est.schmidt), ("Wulff", est.wulff)):
+    r = np.hypot(*f(V).T)
+    densidade = lambda a, b: ((r >= a) & (r < b)).sum() / (np.pi * (b**2 - a**2)) / (len(r) / np.pi)
+    linhas.append((nome, densidade(0, 0.1), densidade(0.95, 1.0)))
+pd.DataFrame(linhas, columns=["projeção", "densidade no centro", "densidade na borda"]).round(2)
+```
+
+Em Schmidt, a densidade é ≈ 1 em toda parte, como esperado. Em Wulff, o centro tem cerca de **o dobro** da densidade ideal e a borda **metade**: a razão centro/borda chega a 4. É por isso que, para **contar** pontos, **contornar** concentrações ou dizer “há mais medidas aqui do que ali”, usa-se **sempre** Schmidt.
+
+### Erro clássico nº 2: a rede errada
+
+Contornos de densidade feitos numa rede de igual ângulo fabricam concentrações no centro que não existem na natureza. Wulff é ótima para resolver *problemas de ângulos* (por exemplo, ângulos entre planos medidos na rede), mas não para estatística.
+
+## Voltando à dobra: onde está o eixo? {#sec-eixo}
+
+Agora aplicamos a ferramenta aos 60 pontos. Converta cada medida em normal e projete os polos:
+
+```{python}
+n = est.normal_do_plano(df.direcao.values, df.mergulho.values)   # 60 normais, forma (60, 3)
+print("forma das normais:", n.shape)
+```
+
+Numa **dobra cilíndrica** (superfície gerada por uma linha que se desloca paralela a si mesma, o *eixo*), todos os planos do acamamento contêm essa linha. Duas consequências geométricas:
+
+* os **polos** do acamamento ficam sobre um grande círculo (uma *guirlanda*, ou diagrama $\pi$), e o eixo é a **normal a essa guirlanda**;
+* os **grandes círculos** dos planos se cruzam todos num mesmo ponto: o eixo (diagrama $\beta$).
+
+A estimativa do eixo é simples e elegante: o tensor de orientação
+
+$$ \mathbf{T} = \frac{1}{N}\sum_{i=1}^{N} \mathbf{n}_i\,\mathbf{n}_i^{\mathsf T} $$ {#eq-tensor}
+
+tem três autovalores $S_1\ge S_2\ge S_3$. As normais ficam espalhadas nas duas direções da guirlanda (autovetores 1 e 2) e quase não saem do plano dela, então a direção em que as normais **menos** variam, o autovetor do **menor** autovalor $S_3$, é o eixo da dobra.
+
+```{python}
+res = est.eixo_dobra(n)
+print(f"eixo estimado : trend {res['trend']:.1f}°, plunge {res['plunge']:.1f}°")
+print("autovalores   :", res["autovalores"].round(4), " (soma =", round(float(res["autovalores"].sum()), 4), ")")
+
+verdadeiro = est.vetor_da_linha(40, 20)        # gabarito do gerador de dados
+print(f"erro angular em relação ao eixo verdadeiro 040/20: {est.angulo_entre_eixos(res['eixo'], verdadeiro):.2f}°")
+```
+
+```{python}
+#| label: fig-pi-beta
+#| fig-cap: "À esquerda, diagrama π: polos do acamamento, grande círculo da guirlanda e eixo estimado (estrela dourada) com o eixo verdadeiro (x preta). À direita, diagrama β: os 60 grandes círculos de acamamento passam todos perto do mesmo ponto."
+fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 5))
+
+gr.rede(a1, "schmidt", cor="0.88")
+a1.plot(*est.schmidt(n).T, "o", ms=4, color="C0", label="polos do acamamento (60)")
+dir_pi, mer_pi, _ = est.plano_da_normal(res["eixo"])             # plano da guirlanda
+a1.plot(*est.schmidt(est.grande_circulo(dir_pi, mer_pi)).T, color="C3", lw=1.6, label="guirlanda (plano π)")
+a1.plot(*est.schmidt(res["eixo"]), "*", ms=16, color="gold", mec="k", label="eixo estimado")
+a1.plot(*est.schmidt(verdadeiro), "x", ms=9, color="k", mew=2, label="eixo verdadeiro")
+a1.set_title("Diagrama π (polos)")
+a1.legend(loc="lower left", fontsize=7, frameon=False)
+
+gr.rede(a2, "schmidt", cor="0.88")
+for dd, mm in zip(df.direcao, df.mergulho):
+    a2.plot(*est.schmidt(est.grande_circulo(dd, mm)).T, color="C0", lw=0.5, alpha=0.6)
+a2.plot(*est.schmidt(res["eixo"]), "*", ms=16, color="gold", mec="k")
+a2.set_title("Diagrama β (grandes círculos)")
+plt.show()
+```
+
+Como ler a @fig-pi-beta. À esquerda, os polos formam uma faixa estreita (a guirlanda) e a estrela dourada está a 90° dessa faixa, como manda a geometria. À direita, as 60 curvas passam, de fato, perto de um mesmo ponto: a estrela. As duas imagens contam a mesma história por caminhos diferentes, e é essa **redundância** que dá confiança no resultado.
+
+### Quanto sobrou de “sujeira”? Os resíduos
+
+Se a dobra fosse perfeitamente cilíndrica e as medidas, perfeitas, todos os polos estariam exatamente sobre o grande círculo. A distância angular de cada polo ao plano da guirlanda é o **resíduo**:
+
+```{python}
+#| label: fig-residuos
+#| fig-cap: "Resíduos angulares dos 60 polos em relação ao plano da guirlanda. Os dados foram gerados com ruído de 4° por eixo, e é isso que aparece aqui."
+resid = est.residuo_angular_ao_circulo(n, res["eixo"])
+print(f"resíduo rms = {np.sqrt((resid**2).mean()):.1f}°   máximo = {resid.max():.1f}°")
+
+fig, ax = plt.subplots(figsize=(5.2, 3.2))
+ax.hist(resid, bins=12, color="C0", alpha=0.8, edgecolor="white")
+ax.set_xlabel("resíduo angular (°)"); ax.set_ylabel("nº de medidas")
+plt.show()
+```
+
+O resíduo típico, ≈ 4°, é o ruído que colocamos nos dados (4° em cada direção) mais o arredondamento da bússola (graus inteiros). Medidas com resíduo muito maior que isso merecem ser conferidas no caderno de campo.
+
+### A forma da nuvem: o parâmetro K de Woodcock
+
+Os autovalores também dizem **que tipo de distribuição** temos. Com $S_1\ge S_2\ge S_3$ [@woodcock1977]:
+
+$$ K = \frac{\ln(S_1/S_2)}{\ln(S_2/S_3)}, \qquad C = \ln(S_1/S_3) $$ {#eq-woodcock}
+
+$K<1$ indica **guirlanda** (polos espalhados ao longo de um círculo); $K>1$ indica **aglomerado** (polos concentrados num ponto). $C$ mede a força da concentração.
+
+```{python}
+K, C = est.parametros_woodcock(res["autovalores"])
+print(f"K = {K:.2f}  ({'guirlanda' if K < 1 else 'aglomerado'}),  C = {C:.2f}")
+```
+
+Com $K\approx 0{,}28$, os polos formam uma guirlanda bem definida, justamente a condição para que o eixo seja bem determinado.
+
+### Erro clássico nº 3: a média errada
+
+Dá vontade de resumir 60 orientações calculando uma média, mas “média” precisa de cuidado com dados que são **axiais** (um plano e o seu oposto são o mesmo plano) e **circulares** (350° e 10° estão a 20°, não a 340°).
+
+```{python}
+print("média aritmética de 350° e 10°:", np.mean([350, 10]), "°   (errado)")
+print("média circular de 350° e 10°  :", round(est.media_circular([350, 10])), "°  (certo)")
+print()
+
+media = n.mean(axis=0)
+print(f"comprimento do vetor médio das normais: {np.linalg.norm(media):.2f}")
+print(f"ângulo entre o vetor médio e o eixo da dobra: {est.angulo_entre_eixos(media / np.linalg.norm(media), res['eixo']):.0f}°")
+
+# Se parte das normais fosse registrada com o sentido oposto (hemisfério superior):
+rng = np.random.default_rng(3)
+n_misto = n * np.where(rng.random(len(n)) < 0.5, -1, 1)[:, None]
+print(f"\ncom sentidos misturados, o vetor médio encolhe para {np.linalg.norm(n_misto.mean(axis=0)):.2f}")
+res_misto = est.eixo_dobra(n_misto)
+print(f"já o eixo pelo tensor muda em {est.angulo_entre_eixos(res_misto['eixo'], res['eixo']):.2f}°")
+```
+
+Três lições nessas linhas. (1) A média aritmética de azimutes falha na passagem por 0°/360°. (2) O vetor médio das normais aponta para o **meio da guirlanda**, 90° distante do eixo, portanto não é o eixo. (3) O vetor médio **depende do sentido** de cada normal (some quando se misturam sentidos), enquanto o tensor $\mathbf{n}\mathbf{n}^{\mathsf T}$ não depende, porque $\mathbf{n}$ e $-\mathbf{n}$ produzem a mesma matriz. Por isso os dados axiais pedem tensor.
+
+## Quão bom é o resultado? Um experimento {#sec-experimento}
+
+Nosso eixo estimado errou por apenas 0,07°. É muito pouco, e **isso é sorte**: foi uma amostra. A pergunta honesta é: *em geral*, quanto o método erra, e do que isso depende? Como o gerador de dados conhece o eixo verdadeiro, podemos repetir o experimento centenas de vezes, variando um fator de cada vez:
+
+* $\psi_{\max}$: **quanto da guirlanda** foi amostrado (poucas camadas inclinadas ou muitas);
+* $\sigma$: o **ruído** das medidas;
+* $N$: o **número** de medidas.
+
+```{python}
+#| label: fig-experimento
+#| fig-cap: "Erro do eixo estimado (mediana e faixa de 10% a 90% em 400 repetições) em função do que foi amostrado (A), do ruído (C) e do número de medidas (D); K mediano em função do trecho amostrado (B). Linha tracejada: K = 1."
+def varrer(nome, valores, reps=400):
+    base = dict(psi_max=55.0, sigma=4.0, n=60)
+    linhas = []
+    for v in valores:
+        e, k = est.experimento_eixo(**{**base, nome: v}, reps=reps)
+        linhas.append((v, np.median(e), *np.percentile(e, [10, 90]), np.median(k)))
+    return np.array(linhas)
+
+por_psi = varrer("psi_max", [5, 10, 15, 20, 30, 40, 55, 70, 85])
+por_sigma = varrer("sigma", [1, 2, 4, 6, 8, 12])
+por_n = varrer("n", [6, 10, 20, 40, 60, 100, 200])
+
+def faixa(ax, tab, rotulo_x, log=False):
+    ax.fill_between(tab[:, 0], tab[:, 2], tab[:, 3], alpha=0.25, color="C0", label="10%–90%")
+    ax.plot(tab[:, 0], tab[:, 1], "o-", color="C0", label="mediana")
+    ax.set_xlabel(rotulo_x); ax.set_ylabel("erro do eixo (°)")
+    if log: ax.set_yscale("log")
+    ax.grid(alpha=0.3)
+
+fig, axs = plt.subplots(2, 2, figsize=(9.5, 6.8), constrained_layout=True)
+faixa(axs[0, 0], por_psi, "ψmax: meia-abertura amostrada da guirlanda (°)", log=True); axs[0, 0].set_title("A")
+axs[0, 0].legend(fontsize=8)
+axs[0, 1].plot(por_psi[:, 0], por_psi[:, 4], "s-", color="C1")
+axs[0, 1].axhline(1, ls="--", color="k")
+axs[0, 1].set_yscale("log"); axs[0, 1].set_xlabel("ψmax (°)"); axs[0, 1].set_ylabel("K mediano"); axs[0, 1].set_title("B"); axs[0, 1].grid(alpha=0.3)
+faixa(axs[1, 0], por_sigma, "ruído σ de cada medida (°)"); axs[1, 0].set_title("C")
+faixa(axs[1, 1], por_n, "número de medidas N"); axs[1, 1].set_title("D")
+plt.show()
+```
+
+O que a @fig-experimento diz, com os números:
+
+* **A geometria manda.** Quando as medidas cobrem só um pedacinho da guirlanda (ψmax = 5°, praticamente um único flanco), o erro mediano é de **≈ 12°** e, em 10% dos casos, passa de **37°**. Com ψmax = 55° (dois flancos bem amostrados), o erro mediano cai para **≈ 0,9°**.
+* **K é o alarme.** No painel B, K fica acima de 1 quando a amostra cobre menos que ≈ ±25° da guirlanda. Se o seu K deu maior que 1, os polos parecem um aglomerado e **o eixo está mal definido**, qualquer que seja o número de medidas.
+* **Ruído e quantidade ajudam como se espera.** O erro cresce proporcionalmente a $\sigma$ (painel C) e diminui como $1/\sqrt{N}$ (painel D, para N a partir de ≈ 10): quadruplicar as medidas só reduz o erro à metade.
+
+A conclusão prática, que vale mais que qualquer fórmula: **antes de medir mais, meça melhor distribuído.** Uma dúzia de medidas bem distribuídas entre os dois flancos supera centenas num flanco só.
+
+## Resumo e lista de erros clássicos {#sec-resumo}
+
+| Etapa | Ferramenta | Armadilha |
+|:--|:--|:--|
+| Anotar | direção/mergulho (mão direita) | convenção trocada (**erro 1**): até 90° de diferença sem aviso |
+| Calcular | normal $\mathbf{n}$ em $(N, E, D)$ | misturar graus e radianos |
+| Desenhar | Schmidt: $(E,N)/\sqrt{1+D}$ | Wulff para contar/contornar (**erro 2**) |
+| Resumir | tensor $\sum \mathbf{n}\mathbf{n}^{\mathsf T}$, autovetores | média de vetores/azimutes (**erro 3**) |
+| Avaliar | resíduos, K e C, experimento sintético | confiar numa única amostra “boa”; ignorar a cobertura da guirlanda |
+
+## Exercícios {#sec-exercicios}
+
+Tente antes de abrir o gabarito. O que importa é o **número que você obtiver e o que ele significa**.
+
+**Exercício 1 (notações).** Converta os três planos abaixo para direção/mergulho pela regra da mão direita e calcule a direção de mergulho, o polo (trend/plunge) e as coordenadas $(x,y)$ de Schmidt. Confira com a figura interativa. Atenção ao lado para onde cada plano mergulha.
+
+| Plano | Rumo/mergulho |
+|:--|:--|
+| a | `N30E/40SE` |
+| b | `N60W/35NE` |
+| c | `N10E/70NW` |
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 1
+O rumo dá o azimute da linha horizontal, mas **dois azimutes opostos** servem. Pela regra da mão direita escolhemos o que deixa o mergulho à direita.
+
+| Plano | Direção/mergulho | Direção de mergulho | Polo (trend / plunge) | Schmidt $(x, y)$ |
+|:--|:--|:--|:--|:--|
+| a | 030/40 | 120° | 300° / 50° | (−0,419; 0,242) |
+| b | 300/35 | 030° | 210° / 55° | (−0,213; −0,368) |
+| c | **190**/70 | 280° | 100° / 20° | (0,799; −0,141) |
+
+No plano **c** o rumo `N10E` corresponde a azimute 010°, mas o mergulho é para NW, que está à *esquerda* de 010°; então usamos a outra ponta da linha, 190°.
+
+```python
+planos = {"a": (30, 40), "b": (300, 35), "c": (190, 70)}
+for nome, (dd, mm) in planos.items():
+    n_ = est.normal_do_plano(dd, mm)
+    trend_, plunge_ = est.linha_do_vetor(n_)
+    print(nome, f"dip_dir {(dd + 90) % 360:.0f}", f"polo {trend_:.0f}/{plunge_:.0f}", est.schmidt(n_).round(3))
+```
+:::
+
+**Exercício 2 (leituras erradas).** Acrescente três leituras defeituosas ao conjunto, `X1 = 100/80`, `X2 = 250/10` e `X3 = 60/70`, e estime o eixo de novo. (a) Quanto o erro piorou? (b) O K denuncia o problema? (c) Os resíduos denunciam? Proponha uma regra automática para descartar as leituras suspeitas e verifique se o erro volta ao valor original.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 2
+(a) O erro sobe de 0,07° para **≈ 2,9°**, cerca de 40 vezes maior, com só 3 leituras ruins em 63. (b) **Não**: K passa de 0,28 para 0,41, e ambos indicam “guirlanda”. O K descreve a forma da nuvem, não a presença de intrusos. (c) **Sim**: os três pontos têm resíduos bem maiores que os demais. Uma regra robusta: estimar o desvio pelo resíduo mediano ($\hat\sigma = \text{mediana}/0{,}6745$, que não é afetada por poucos extremos) e descartar o que passar de $3\hat\sigma$.
+
+```python
+extras = pd.DataFrame({"id": ["X1", "X2", "X3"], "direcao": [100, 250, 60], "mergulho": [80, 10, 70]})
+df2 = pd.concat([df, extras], ignore_index=True)
+n2 = est.normal_do_plano(df2.direcao.values, df2.mergulho.values)
+r2 = est.eixo_dobra(n2)
+erro_com = est.angulo_entre_eixos(r2["eixo"], verdadeiro)
+
+res2 = est.residuo_angular_ao_circulo(n2, r2["eixo"])
+sigma_robusto = np.median(res2) / 0.6745
+mantidos = res2 <= 3 * sigma_robusto
+r3 = est.eixo_dobra(n2[mantidos])
+erro_depois = est.angulo_entre_eixos(r3["eixo"], verdadeiro)
+print(erro_com, df2.id[~mantidos].tolist(), erro_depois)
+```
+
+Resultado: a regra descarta exatamente `X1`, `X2` e `X3`, e o erro volta a 0,07°. Moral: **olhe os resíduos**, não só o resumo.
+:::
+
+**Exercício 3 (preveja e depois teste).** Sem rodar nada, escreva sua previsão: se a amostra cobrir só ψmax = 10° da guirlanda (σ = 4°, N = 60), o erro mediano será maior ou menor que 1°? O K ficará acima ou abaixo de 1? Depois rode `est.experimento_eixo(10, 4, 60)` e compare.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 3
+```python
+erros, ks = est.experimento_eixo(10, 4, 60, reps=400)
+print(np.median(erros), np.percentile(erros, [10, 90]), np.median(ks), (ks > 1).mean())
+```
+Resultado: erro mediano **≈ 4,4°** (faixa de 1,2° a 10,8°), K mediano **≈ 3,7**, e K > 1 em 100% das repetições. Ou seja, o método continua “funcionando” e devolvendo um número, mas com erro de vários graus, e o K avisa. Prever e depois conferir é o jeito mais rápido de calibrar a intuição.
+:::
+
+**Exercício 4 (área na ponta do lápis).** Mostre que, num sorteio uniforme no hemisfério, a fração de pontos com raio menor que $r = 0{,}5$ é $r^2 = 0{,}25$ em Schmidt e **0,40** em Wulff. (Dica: na @sec-projecao, $r^2 = 1 - D$ vale só para Schmidt; em Wulff, $r = \tan(\theta/2)$.)
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 4
+Em Wulff, $r=\tan(\theta/2)$ dá $\cos\theta = (1-r^2)/(1+r^2)$, e a fração do hemisfério dentro de $\theta$ é $1-\cos\theta = 2r^2/(1+r^2)$. Para $r = 0{,}5$: $0{,}5/1{,}25 = 0{,}40$.
+
+```python
+rng = np.random.default_rng(10)
+V = rng.normal(size=(500_000, 3))
+V = est.para_baixo(V / np.linalg.norm(V, axis=1, keepdims=True))
+for nome, f in (("Schmidt", est.schmidt), ("Wulff", est.wulff)):
+    print(nome, (np.hypot(*f(V).T) < 0.5).mean().round(3))
+```
+Resultado: 0,250 em Schmidt e 0,400 em Wulff.
+:::
+
+**Desafio (interseção de planos).** A direção em que dois planos se cortam é dada pelo produto vetorial das normais, $\mathbf{n}_1\times\mathbf{n}_2$. Use isso para estimar o eixo com **pares** de medidas. Compare com o método do tensor: que erro mediano resulta, e por que o resultado depende tanto do par escolhido?
+
+::: {.callout-tip collapse="true"}
+## Gabarito do desafio
+```python
+erros_par, angulos = [], []
+for i in range(len(n)):
+    for j in range(i + 1, len(n)):
+        c = np.cross(n[i], n[j]); nc = np.linalg.norm(c)
+        erros_par.append(est.angulo_entre_eixos(c / nc, verdadeiro))
+        angulos.append(np.degrees(np.arcsin(min(1.0, nc))))
+erros_par, angulos = np.array(erros_par), np.array(angulos)
+print(np.median(erros_par), np.median(erros_par[angulos < 10]), np.median(erros_par[angulos >= 30]))
+```
+Resultado: com os 1 770 pares possíveis, o erro **mediano é ≈ 8,4°** (faixa de 10% a 90%: 2,8° a 41°). Pares de planos quase paralelos (ângulo < 10°, 251 pares) erram em mediana **≈ 35°**; pares bem diferentes (≥ 30°, 932 pares), **≈ 5,4°**. Dois planos quase paralelos quase não “sabem” onde se cortam, e o ruído de 4° nas leituras domina. O tensor usa **todas** as medidas de uma vez e dá 0,07° nesta amostra (≈ 0,9° em mediana, @sec-experimento).
+:::
+
+## Autoavaliação {#sec-autoavaliacao}
+
+Marque com honestidade. No Notion, atualize o *Nível atual* do módulo correspondente (Fase 4 · Livro-laboratório).
+
+| Nível | Você consegue... |
+|:--|:--|
+| **1 · Reconheço** | Dizer o que são direção, mergulho, direção de mergulho, polo, trend e plunge; distinguir Schmidt de Wulff; dizer o que é o eixo de uma dobra cilíndrica. |
+| **2 · Explico** | Explicar, sem consultar, por que o polo de um plano tem trend = direção de mergulho + 180° e plunge = 90° − mergulho; por que Schmidt para contagem; por que tensor e não média; o que K > 1 significa. |
+| **3 · Executo** | Carregar **seus próprios** dados de campo num CSV, desenhar polos e círculos em Schmidt, estimar o eixo, examinar resíduos e K e escrever 3 linhas de conclusão, sem copiar o capítulo. |
+| **4 · Ensino** | Montar uma aula de 50 min com a figura interativa e os três erros clássicos; propor um exercício novo com resposta conferida em código. |
+
+## Para ir além {#sec-alem}
+
+* **Próximos passos deste caminho:** densidade de polos e contornos de Kamb (estatística em esfera); análise de falhas e tensões a partir de estrias; rotação de dados (restaurar o acamamento).
+* **Uma biblioteca pronta:** depois de entender o que há por baixo, vale conhecer pacotes que fazem tudo isso e mais (por exemplo, o `mplstereonet`). Entender o cálculo primeiro é o que permite checar um pacote, em vez de confiar nele às cegas.
+* **Referências:** @allmendinger2012 (fonte dos algoritmos vetoriais e tensoriais), @woodcock1977 (parâmetros K e C) e @fisher1953 (estatística em esfera, base para os próximos capítulos).
+
+Atualize seu repositório com `git add`, `git commit`, `git push`; a publicação do livro é automática (ver README).
