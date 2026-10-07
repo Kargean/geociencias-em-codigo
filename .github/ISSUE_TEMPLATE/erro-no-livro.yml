@@ -1,0 +1,32 @@
+name: Erro no livro
+description: Número errado, código que não roda, explicação incorreta, link quebrado.
+title: "[erro] "
+labels: ["erro-no-livro"]
+body:
+  - type: input
+    id: onde
+    attributes:
+      label: Onde?
+      description: "Capítulo e seção, por exemplo: Semana 2, seção Testes."
+    validations:
+      required: true
+  - type: textarea
+    id: o-que
+    attributes:
+      label: O que está errado?
+    validations:
+      required: true
+  - type: textarea
+    id: esperado
+    attributes:
+      label: O que deveria estar?
+      description: Se tiver a fonte, cole o link ou a referência.
+    validations:
+      required: false
+  - type: textarea
+    id: saida
+    attributes:
+      label: Mensagem de erro completa (se houver)
+      render: text
+    validations:
+      required: false

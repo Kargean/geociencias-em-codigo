@@ -1,0 +1,55 @@
+name: Publicar livro
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências Python
+        run: pip install -r requirements.txt
+
+      - name: Testar a matemática antes de publicar
+        run: python tests/test_estrutural.py
+
+      - name: Testar o projeto de chuva (módulo P0-00)
+        run: python -m unittest discover -s tests -v
+        working-directory: projeto_chuva
+
+      - uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Renderizar o livro
+        run: quarto render
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _book
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,43 @@
+name: Melhoria ou ideia
+description: Algo que pode ficar melhor no livro, no código ou no roteiro de estudo.
+title: "[melhoria] "
+labels: ["melhoria"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Uma melhoria por issue. Quanto mais concreta, mais fácil de resolver.
+  - type: dropdown
+    id: parte
+    attributes:
+      label: Parte do roteiro
+      options:
+        - P0 Ambiente e método
+        - P1 Programação e dados tabulares
+        - P2 Dados espaciais
+        - P3 Bancos de dados, APIs e interfaces
+        - P4 Estatística aplicada
+        - P5 Multivariada e geoestatística
+        - P6 Aprendizado de máquina espacial
+        - P7 Sensoriamento remoto e PDI
+        - P8 Água
+        - P9 Solo e rocha
+        - P10 WebGIS e automação
+        - P11 Publicação e projetos
+        - Geral (livro inteiro)
+    validations:
+      required: true
+  - type: textarea
+    id: situacao
+    attributes:
+      label: O que aconteceu ou o que falta?
+      description: Onde você travou, o que não ficou claro, o que faltou.
+    validations:
+      required: true
+  - type: textarea
+    id: proposta
+    attributes:
+      label: O que você sugere?
+      description: Pode ser só uma ideia. Se não souber, deixe em branco.
+    validations:
+      required: false

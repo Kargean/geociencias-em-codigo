@@ -1,0 +1,8 @@
+# Verifica toda semana se as ações usadas em .github/workflows têm versão nova
+# e abre um pull request sugerindo a atualização.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

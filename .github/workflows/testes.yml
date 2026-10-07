@@ -1,0 +1,39 @@
+name: Testes
+
+# Quando rodar: a cada push na main, em todo pull request e quando você pedir (botão "Run workflow").
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Permissão mínima: este fluxo só precisa LER o código.
+permissions:
+  contents: read
+
+jobs:
+  testes:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Entre aspas! Sem aspas, 3.10 seria lido como o número 3.1.
+        python: ["3.11", "3.12", "3.13"]
+    defaults:
+      run:
+        working-directory: projeto_chuva
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Mostrar versões
+        run: |
+          python --version
+          python -c "import sqlite3; print('SQLite', sqlite3.sqlite_version)"
+
+      - name: Rodar os testes
+        run: python -m unittest discover -s tests -v
