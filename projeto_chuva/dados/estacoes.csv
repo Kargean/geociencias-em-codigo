@@ -1,0 +1,5 @@
+id,nome,lat,lon,altitude_m,bacia
+E01,Planície,-21.75,-41.3,12.0,Bacia Alfa
+E02,Colina,-21.7,-41.4,85.0,Bacia Alfa
+E03,Serra,-21.6,-41.8,640.0,Bacia Beta
+E04,Litoral,-21.85,-41.05,3.0,Bacia Beta
