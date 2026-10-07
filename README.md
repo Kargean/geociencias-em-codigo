@@ -36,7 +36,7 @@ CITATION.cff                 como citar
 4. **Criar os arquivos “ocultos” pelo navegador** (pastas que começam com ponto costumam ser ignoradas no arrastar-e-soltar):
    * **Add file → Create new file**, nome `.github/workflows/publicar.yml` (digitar as barras cria as pastas), cole o conteúdo do arquivo de mesmo nome que acompanha este pacote e confirme o commit;
    * repita para `.gitignore` e para cada arquivo da pasta `.github/` (`workflows/testes.yml`, `ISSUE_TEMPLATE/*`, `pull_request_template.md`, `dependabot.yml`). É trabalhoso, e é um bom motivo para aprender o Git no módulo P0-00.
-5. **Ativar a publicação:** **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+5. **Ativar a publicação:** abra o **seu repositório** (`github.com/SEU-USUARIO/geociencias-em-codigo`), clique na aba **Settings** que fica na barra do repositório (a última, à direita de Insights) e, no menu à esquerda, em **Pages**. Em **Build and deployment → Source**, escolha **GitHub Actions**. Atenção: o *Settings* do seu perfil (menu da foto, `github.com/settings/pages`) tem uma página "Pages" que só mostra domínios verificados; não é essa.
 6. **Acompanhar:** aba **Actions**. O fluxo “Publicar livro” roda a cada `push` na branch `main`. Se a primeira execução falhar com mensagem sobre o Pages ainda não estar ativado, faça o passo 5 e clique em **Re-run all jobs**.
 7. O livro aparece em `https://SEU-USUARIO.github.io/geociencias-em-codigo/`. Depois, em `_quarto.yml`, descomente `repo-url` e troque `SEU-USUARIO`.
 
@@ -69,7 +69,7 @@ O Quarto se instala à parte (quarto.org). Sem ele, ainda dá para: `python tool
 
 **Não testado:**
 
-* a **publicação no Pages**: no primeiro `push`, o job `deploy` falhou com erro 404 ("Ensure GitHub Pages has been enabled"), porque o Pages ainda não estava ativado. O que falta é o passo 5 acima (**Settings → Pages → Source: GitHub Actions**) e **Re-run failed jobs**;
+* a **publicação no Pages**: no primeiro `push`, o job `deploy` falhou com erro 404 ("Ensure GitHub Pages has been enabled"), porque o Pages ainda não estava ativado. O que falta é o passo 5 acima (**Settings do repositório → Pages → Source: GitHub Actions**) e **Re-run failed jobs**;
 * a **aparência do HTML renderizado** (figuras, saídas do laboratório de Git, possíveis linhas repetidas entre aspas): o `build` passou, mas o log e o artefato não puderam ser baixados do ambiente de preparo. Confira abrindo o livro publicado;
 * **os passos de clique na interface do GitHub** descritos na Semana 3 (issues, pull requests, rulesets, Insights): vêm da documentação e do uso comum, e devem ser conferidos na tela atual;
 * `pytest`, `coverage`, `pre-commit` e `act`, citados só como próximos passos.
