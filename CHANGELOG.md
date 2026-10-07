@@ -16,6 +16,7 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/). Enqu
 - Prévia estática (`tools/previa_html.py`): resolve referências entre capítulos, respeita `echo: false` e não repete a saída já impressa.
 
 ### Alterado
+- Documentação dos limites (README e `CLAUDE.md`) atualizada com o que o primeiro `push` confirmou: testes verdes em Python 3.11, 3.12 e 3.13, renderização do Quarto concluída; falta ativar o Pages.
 - `publicar.yml` passa a rodar também os testes do projeto de chuva antes de publicar.
 - Roteiro reorganizado em 12 partes (P0 a P11) com foco na pilha de ferramentas; estrutural e oceanografia viraram aplicações.
 

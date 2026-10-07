@@ -65,12 +65,12 @@ O Quarto se instala à parte (quarto.org). Sem ele, ainda dá para: `python tool
 
 ## O que foi e o que NÃO foi testado
 
-**Testado:** a matemática do capítulo de exemplo (9 testes) e todos os números citados no texto dele (47 conferências); a execução ponta a ponta de todos os blocos de código dos cinco capítulos do módulo P0-00, **inclusive os gabaritos** (`tests/test_modulo_p0.py`, 16 testes); os 104 testes do projeto de chuva; os comandos de Git das Semanas 1 e 3, **executados de verdade** num laboratório descartável (com um "GitHub de mentirinha" local); a validade dos arquivos de configuração do GitHub (YAML) e as opções de `gh` citadas, conferidas na ajuda da versão instalada; a figura interativa no Chromium; e uma prévia estática dos capítulos.
+**Testado:** a matemática do capítulo de exemplo (9 testes) e todos os números citados no texto dele (47 conferências); a execução ponta a ponta de todos os blocos de código dos cinco capítulos do módulo P0-00, **inclusive os gabaritos** (`tests/test_modulo_p0.py`, 16 testes); os 104 testes do projeto de chuva; os comandos de Git das Semanas 1 e 3, **executados de verdade** num laboratório descartável (com um "GitHub de mentirinha" local); a validade dos arquivos de configuração do GitHub (YAML) e as opções de `gh` citadas, conferidas na ajuda da versão instalada; a figura interativa no Chromium; uma prévia estática dos capítulos; e, **no próprio GitHub** (primeiro `push`, 07/10/2026), o fluxo **Testes** em Python 3.11, 3.12 e 3.13 e o job `build` do fluxo **Publicar livro** (testes do livro e do projeto de chuva e a renderização do Quarto), todos verdes.
 
 **Não testado:**
 
-* a renderização pelo **Quarto** e a publicação pelo **GitHub Actions/Pages** (o ambiente onde o material foi preparado não tinha o Quarto nem acesso ao GitHub). A primeira execução do fluxo é o teste real; se algo falhar, copie a mensagem de erro da aba **Actions** e abra um issue;
-* a execução do `testes.yml` no GitHub: os mesmos comandos foram rodados localmente com Python 3.13; as versões 3.11 e 3.12 só serão exercitadas no GitHub;
+* a **publicação no Pages**: no primeiro `push`, o job `deploy` falhou com erro 404 ("Ensure GitHub Pages has been enabled"), porque o Pages ainda não estava ativado. O que falta é o passo 5 acima (**Settings → Pages → Source: GitHub Actions**) e **Re-run failed jobs**;
+* a **aparência do HTML renderizado** (figuras, saídas do laboratório de Git, possíveis linhas repetidas entre aspas): o `build` passou, mas o log e o artefato não puderam ser baixados do ambiente de preparo. Confira abrindo o livro publicado;
 * **os passos de clique na interface do GitHub** descritos na Semana 3 (issues, pull requests, rulesets, Insights): vêm da documentação e do uso comum, e devem ser conferidos na tela atual;
 * `pytest`, `coverage`, `pre-commit` e `act`, citados só como próximos passos.
 
