@@ -1,20 +1,20 @@
-"""Testes do capítulo P1-06 (SQL essencial I): o código executa e os números citados no texto conferem.
+"""Testes dos capítulos P1-06 (SQL essencial I) e P1-07 (SQL essencial II): o código executa e os números citados no texto conferem.
 
-Execute:  python tests/test_modulo_p1.py        (leva poucos segundos; precisa de matplotlib e PyYAML)
+Execute:  python tests/test_modulo_p1.py        (leva poucos segundos; precisa de matplotlib, PyYAML e, para o P1-07, pandas)
 
-O que este arquivo garante:
+O que este arquivo garante, para cada capítulo:
   1. todos os blocos de código do capítulo (e os gabaritos dos exercícios) executam em ordem, sem avisos de descontinuação;
-  2. os números que o texto cita são os que o código calcula (contagens, médias, datas, resultados das cinco perguntas);
-  3. a lógica de três valores e as regras de afinidade de tipos escritas em Python batem com o SQLite;
-  4. as respostas do SQL batem com cálculos independentes em Python;
-  5. o registro do PostgreSQL tem uma entrada para cada sonda de dialeto (o registro em si NÃO é reexecutado aqui);
-  6. a estrutura do capítulo (seções, gabaritos recolhíveis, rótulos) e a ordem no _quarto.yml estão corretas.
+  2. os números que o texto cita são os que o código calcula;
+  3. as respostas do SQL batem com cálculos independentes em Python (e, no P1-07, com o pandas);
+  4. o registro do PostgreSQL tem uma entrada para cada sonda de dialeto (o registro em si NÃO é reexecutado aqui);
+  5. a estrutura do capítulo (seções, gabaritos recolhíveis, rótulos) e a ordem no _quarto.yml estão corretas.
 
-O que ele NÃO garante: que o Quarto renderiza o capítulo, que o código roda no Windows ou em outras versões do SQLite,
+O que ele NÃO garante: que o Quarto renderiza os capítulos, que o código roda no Windows ou em outras versões do SQLite,
 nem que o registro do PostgreSQL continua valendo em outras versões.
 """
 import contextlib
 import io
+import math
 import re
 import sqlite3
 import sys
@@ -31,10 +31,20 @@ sys.path.insert(0, str(RAIZ / "tools"))
 from executar_codigo_qmd import executar  # noqa: E402
 
 CAPITULO = "p1-06-sql-essencial-i.qmd"
+CAPITULO_107 = "p1-07-sql-essencial-ii.qmd"
 
 
 def ler(caminho):
     return (RAIZ / caminho).read_text(encoding="utf-8")
+
+
+def executar_celula(caminho, rotulo):
+    """Executa só a célula de código com o rótulo dado (útil para pegar os dados de outro capítulo) e devolve o espaço de nomes."""
+    m = re.search(r"#\| label: " + re.escape(rotulo) + r"\n(.*?)^```", ler(caminho), re.S | re.M)
+    assert m, f"célula {rotulo} não encontrada em {caminho}"
+    ns = {}
+    exec(m.group(1), ns)
+    return ns
 
 
 class CapituloP106(unittest.TestCase):
@@ -307,6 +317,315 @@ class Estrutura(unittest.TestCase):
             for g in re.findall(r"""f(?:"[^"\n]*"|'[^'\n]*')""", m.group(1)):
                 for expressao in re.findall(r"\{([^{}]*)\}", g):
                     self.assertNotIn("\\", expressao, g)
+
+
+# =====================================================================================================================
+#  P1-07 · SQL essencial II: agregação e junções
+# =====================================================================================================================
+CONFERENCIAS_107 = {
+    "agregados", "media_ingenua", "vazio", "campanhas", "por_parametro", "od_por_ponto", "coluna_solta", "grupo_null",
+    "having", "having_contagem", "min_ou_media", "conformidade", "left_inner_fontes", "left_contagem", "where_ou_on",
+    "anti_join", "fanout_contagem", "fanout_media", "fanout_por_ponto", "fanout_remendos", "fanout_correcao",
+    "pandas_groupby", "pandas_dropna", "pandas_merge", "pandas_validate", "pandas_limites", "pandas_to_sql", "relatorio",
+}
+
+
+class CapituloP107(unittest.TestCase):
+    """Executa o capítulo P1-07 uma vez e guarda o espaço de nomes e a saída."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import pandas  # noqa: F401
+        except ImportError:
+            raise unittest.SkipTest("o capítulo P1-07 usa o pandas (pip install pandas)")
+        buffer = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(io.StringIO()):
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error", DeprecationWarning)   # o mesmo rigor do P1-06
+                    cls.ns = executar(RAIZ / CAPITULO_107, tempfile.mkdtemp(), incluir_gabaritos=True, verbose=False)
+        except SystemExit:
+            raise AssertionError(f"{CAPITULO_107}: um bloco de código falhou.\n{buffer.getvalue()[-3000:]}")
+        cls.saida = buffer.getvalue()
+        cls.texto = ler(CAPITULO_107)
+
+    # -- as conferências do próprio capítulo ---------------------------------------------------------------------
+    def test_todas_as_conferencias_do_capitulo_deram_verdadeiro(self):
+        conf = self.ns["conferencias"]
+        self.assertEqual(set(conf), CONFERENCIAS_107)       # nenhuma conferência foi removida ou esquecida
+        self.assertEqual([k for k, v in conf.items() if v is not True], [])
+
+    # -- dados, chaves e esquema --------------------------------------------------------------------------------
+    def test_dados_e_tabelas(self):
+        ns = self.ns
+        self.assertEqual((len(ns["PONTOS"]), len(ns["PARAMETROS"]), len(ns["RESULTADOS"]), len(ns["FONTES"])), (4, 3, 20, 4))
+        self.assertEqual((ns["OD_MINIMO_MG_L"], ns["PH_MINIMO"], ns["PH_MAXIMO"], ns["TURBIDEZ_MAXIMA_UNT"]), (5.0, 6.0, 9.0, 100.0))
+        self.assertEqual(sum(1 for r in ns["RESULTADOS"] if r[3] is None), 1)
+        self.assertEqual({r[0] for r in ns["RESULTADOS"]}, {"P01", "P02", "P03"})     # o P04 não tem coleta
+        self.assertIn("P04", {p[0] for p in ns["PONTOS"]})
+        # os 20 resultados são os mesmos do P1-06 (pontos, datas, parâmetros e valores)
+        p106 = {tuple(a[:4]) for a in executar_celula(CAPITULO, "p106-dados")["AMOSTRAS"]}
+        self.assertEqual({tuple(r) for r in ns["RESULTADOS"]}, p106)
+
+    def test_chave_estrangeira_no_sqlite(self):
+        ns = self.ns
+        self.assertEqual(ns["fk_padrao"], 0)                                   # desligada numa conexão nova
+        self.assertEqual(ns["orfao_sem_fk"], "ENTROU")
+        self.assertEqual(ns["fk_ligada"], 1)
+        self.assertTrue(ns["orfao_com_fk"].startswith("RECUSADO"))
+        self.assertIn("FOREIGN KEY constraint failed", ns["orfao_com_fk"])
+        self.assertEqual(ns["orfaos_antigos"], [("resultado", 1, "ponto", 0)])  # foreign_key_check acha o órfão antigo
+        self.assertEqual(ns["fk_dentro_de_transacao"], 0)                      # o PRAGMA é ignorado numa transação
+        self.assertEqual(ns["pk_nulo"]["sem NOT NULL"], "ENTROU")
+        self.assertTrue(ns["pk_nulo"]["com NOT NULL"].startswith("RECUSADO"))
+        self.assertTrue(ns["recusa_filho"].startswith("RECUSADO") and ns["recusa_pai"].startswith("RECUSADO"))
+
+    # -- agregação ----------------------------------------------------------------------------------------------
+    def test_agregados_numeros_citados(self):
+        ns = self.ns
+        self.assertEqual(tuple(ns["agregados_sql"]), (6, 5, 234.0, 46.8, 9.0, 135.0))   # "6 análises, 5 com resultado, 234,0, 46,8"
+        self.assertAlmostEqual(ns["media_certa"], 46.8)
+        self.assertAlmostEqual(ns["media_zero"], 39.0)
+        self.assertAlmostEqual(ns["soma_sobre_linhas"], 39.0)
+        self.assertAlmostEqual(ns["media_de_tudo"], 17.1105, places=4)
+        self.assertEqual(ns["vazio_sql"], (0, 0, None, None, 0.0))
+        self.assertEqual(ns["campanhas"], 3)
+
+    def test_grupos_numeros_citados(self):
+        ns = self.ns
+        self.assertEqual([(r[0], r[1], r[2], r[3], r[4], r[5]) for r in ns["por_parametro_sql"]],
+                         [("OD", 7, 7, 6.24, 3.9, 7.8), ("pH", 7, 7, 6.77, 5.8, 7.4), ("turbidez", 6, 5, 46.8, 9.0, 135.0)])
+        self.assertEqual(ns["od_por_ponto_sql"], [("P01", 3, 7.47), ("P02", 3, 4.93), ("P03", 1, 6.5)])
+        self.assertEqual(len(ns["solta"]), 3)
+        self.assertEqual(len(ns["grupos_turbidez"]), 6)
+        self.assertEqual(dict(ns["grupos_turbidez"])[None], 1)
+
+    def test_having_numeros_citados(self):
+        ns = self.ns
+        self.assertEqual(ns["having_sql"], [("P02", 3, 4.93)])
+        self.assertIn("misuse of aggregate", ns["erro_agregado_no_where"])
+        self.assertEqual(ns["AMOSTRAS_MINIMAS"], 2)
+        self.assertEqual(ns["minimo_sql"], [("P01", 3, 7.47), ("P02", 3, 4.93)])      # P03 (1 só resultado) fica de fora
+        self.assertEqual(ns["alguma_sql"], [("P02", 3, 3.9)])
+
+    # -- junções ------------------------------------------------------------------------------------------------
+    def test_join_numeros_citados(self):
+        ns = self.ns
+        self.assertEqual(ns["conformidade_sql"], [
+            ("P01", "OD", 3, 0), ("P01", "pH", 3, 0), ("P01", "turbidez", 3, 0),
+            ("P02", "OD", 3, 2), ("P02", "pH", 3, 1), ("P02", "turbidez", 2, 1),
+            ("P03", "OD", 1, 0), ("P03", "pH", 1, 0),
+        ])
+        self.assertEqual((len(ns["inner_pf"]), len(ns["left_pf"])), (4, 6))
+        self.assertEqual(ns["contagem_sql"], [("P01", 9, 9), ("P02", 9, 9), ("P03", 2, 2), ("P04", 1, 0)])
+        self.assertEqual(ns["com_where"], [("P01", 3), ("P02", 3), ("P03", 1)])        # o WHERE perde o P04
+        self.assertEqual(ns["com_on"], [("P01", 3), ("P02", 3), ("P03", 1), ("P04", 0)])
+        self.assertEqual(ns["sem_coleta_sql"], ["P04"])
+        if not str(ns["n_right"]).startswith("ERRO"):      # RIGHT JOIN: 20 resultados + o P04 sem par
+            self.assertEqual(ns["n_right"], 21)
+
+    def test_multiplicacao_de_linhas_numeros_citados(self):
+        ns = self.ns
+        self.assertEqual(ns["previsto"], (20, 22, 31))
+        self.assertEqual(ns["no_sql"], (20, 22, 31))
+        self.assertEqual([round(ns[k], 4) for k in ("media_correta", "media_interna", "media_externa")], [6.2429, 5.3250, 5.9091])
+        self.assertEqual(ns["fanout_por_ponto"], [("P01", 3, 3, 22.4, 7.47), ("P02", 6, 3, 29.6, 4.93), ("P03", 2, 1, 13.0, 6.5)])
+        self.assertEqual(ns["soma_certa"], {"P01": 22.4, "P02": 14.8, "P03": 6.5})
+        self.assertEqual(ns["n_distintos"], 20)
+        self.assertAlmostEqual(ns["media_distinta"], 6.0)
+        self.assertAlmostEqual(ns["media_certa_pequena"], 19 / 3)
+        self.assertEqual(ns["corrigido_sql"], [("P01", 3, 7.47, 0), ("P02", 3, 4.93, 2), ("P03", 1, 6.5, 2)])
+        self.assertEqual(ns["linhas_depois"], 20)
+        self.assertAlmostEqual(ns["media_global_corrigida"], ns["media_correta"])
+        # a função que prevê o tamanho de uma junção, nos casos simples
+        f = ns["linhas_apos_join"]
+        self.assertEqual(f(["a", "a", "b"], ["a", "a", "a"], "interno"), 6)
+        self.assertEqual(f(["a", "b", "c"], ["a", "a"], "externo"), 4)
+        self.assertEqual(f([], ["a"], "interno"), 0)
+
+    def test_figura(self):
+        figuras = self.ns["_figuras"]
+        self.assertEqual(len(figuras), 1)
+        self.assertTrue(figuras[0].is_file())
+        self.assertIn("valores desenhados, painel (a): (20, 22, 31)", self.saida)
+        self.assertIn("valores desenhados, painel (b): [6.24, 5.33, 5.91]", self.saida)
+
+    # -- pandas -------------------------------------------------------------------------------------------------
+    def test_pandas(self):
+        ns = self.ns
+        self.assertEqual(ns["df"].shape, (20, 4))
+        self.assertEqual(int(ns["df"]["valor"].isna().sum()), 1)
+        self.assertEqual((len(ns["m_interno"]), len(ns["m_externo"])), (22, 31))
+        self.assertEqual((len(ns["grupos_padrao"]), len(ns["grupos_com_nan"])), (5, 6))
+        self.assertTrue(ns["erro_validate"].startswith("Merge keys are not unique"))
+        self.assertEqual(ns["n_orfaos"], 1)                          # validate="many_to_one" não acusa a chave órfã
+        self.assertEqual((ns["n_linhas_pandas"], ns["n_linhas_sql"]), (2, 1))   # NaN casa com NaN no pandas; NULL não casa no SQL
+        self.assertTrue(ns["perdeu_regras"])                         # o to_sql(replace) perde as regras da tabela
+        self.assertEqual((ns["linhas_guardadas"], ns["linhas_depois_do_ruim"]), (20, 20))
+        self.assertTrue(ns["recusou_dado_ruim"])
+
+    # -- prática, dialetos e exercícios -------------------------------------------------------------------------------
+    def test_relatorio_numeros_citados(self):
+        self.assertEqual(self.ns["relatorio_sql"], [
+            ("P01", 3, 9, 0, 100.0), ("P02", 3, 8, 4, 50.0), ("P03", 1, 2, 0, 100.0), ("P04", 0, 0, 0, None)])
+
+    def test_dialetos(self):
+        ns = self.ns
+        chaves = {c for c, _o_que, _sql in ns["SONDAS"]}
+        self.assertEqual(set(ns["dialeto_sqlite"]), chaves)
+        self.assertEqual(set(ns["POSTGRESQL_16_15"]), chaves)                       # o registro cobre cada sonda
+        sq, pg = ns["dialeto_sqlite"], ns["POSTGRESQL_16_15"]
+        self.assertEqual(sq["coluna_solta"], "3")
+        self.assertEqual(sq["having_coluna_solta"], "3")                            # o SQLite aceita a coluna solta no HAVING
+        self.assertEqual(sq["round_media"], "6.2")
+        self.assertEqual(sq["avg_inteiros"], "1.5")
+        self.assertTrue(sq["agregado_where"].startswith("ERRO"))
+        self.assertEqual(sq["conjunto_vazio"], "0 | NULL | NULL")
+        self.assertEqual(sq["ordem_null"], "NULL")                                  # o SQLite põe o NULL primeiro
+        self.assertEqual((sq["div_zero_pct"], sq["nullif_pct"]), ("NULL", "NULL"))
+        self.assertEqual(sq["avg_distinct"], "6.0")
+        self.assertEqual((sq["fk_padrao"], sq["pk_texto_nulo"]), ("ENTROU", "ENTROU"))
+        self.assertEqual(pg["ordem_null"], "9")                                     # o PostgreSQL põe o NULL por último
+        self.assertEqual(pg["conjunto_vazio"], sq["conjunto_vazio"])
+        self.assertEqual(pg["avg_distinct"], "6.0000000000000000")
+        for chave in ("coluna_solta", "having_coluna_solta", "apelido_having", "round_media", "agregado_where", "group_concat", "div_zero_pct", "fk_padrao", "pk_texto_nulo"):
+            self.assertTrue(pg[chave].startswith("ERRO"), chave)
+
+    def test_roteiro_do_postgresql_cobre_cada_sonda_e_nao_tem_segredo(self):
+        roteiro = ler("tools/registro_postgresql_p1-07.sql")
+        for chave in self.ns["POSTGRESQL_16_15"]:
+            self.assertIn(f"@@ {chave}", roteiro, chave)
+        self.assertEqual(roteiro.count("CREATE TEMP TABLE"), 5)    # 4 do capítulo + a da sonda da chave primária
+        self.assertNotIn("CREATE TABLE", roteiro.replace("CREATE TEMP TABLE", ""))   # só tabelas temporárias
+        self.assertNotIn("DROP", roteiro.upper())
+        for suspeito in ("password", "senha", "token", "ghp_"):
+            self.assertNotIn(suspeito, roteiro.lower())
+
+    def test_gabaritos_dos_exercicios(self):
+        ns = self.ns
+        self.assertEqual({k: v[0] for k, v in ns["ex1"].items()}, {"a": 4, "b": 6, "c": 21, "d": 20})
+        self.assertEqual((ns["por_media"], ns["por_minimo"]), (["P02"], ["P01", "P02"]))
+        self.assertAlmostEqual(ns["media_p01"], 6.825)
+        self.assertEqual((ns["media_p02_ignora"], ns["media_p02_zero"], ns["n_linhas_p02"], ns["n_medidos_p02"]), (97.5, 65.0, 3, 2))
+        self.assertEqual(ns["certo"], [("P01", 3), ("P02", 3), ("P03", 1), ("P04", 0)])
+        self.assertEqual(ns["errado"], [("P01", 3), ("P02", 3), ("P03", 1)])
+        self.assertEqual((ns["n_interno"], ns["n_externo"]), (8, 11))
+        self.assertAlmostEqual(ns["soma_interna"], 42.6)
+        self.assertAlmostEqual(ns["soma_externa"], 65.0)
+        self.assertEqual(ns["ex6_a"], [("P01", 7.8), ("P02", 6.1), ("P03", 6.5)])
+        self.assertEqual(len(ns["ex6_b"]), 20)
+        self.assertEqual(ns["largo_sql"], [("P01", 7.47, 7.03, 13.0), ("P02", 4.93, 6.3, 97.5), ("P03", 6.5, 7.4, None), ("P04", None, None, None)])
+        self.assertEqual(ns["com_else_zero"], 2.49)
+
+    def test_o_banco_do_capitulo_foi_fechado_no_fim(self):
+        with self.assertRaises(sqlite3.ProgrammingError):
+            self.ns["banco"].execute("SELECT 1")
+
+    def test_o_texto_cita_os_numeros_certos(self):
+        texto = self.texto
+        for citacao in (
+            "46,8", "234,0", "**39,0**", "17,1105", "6,24", "6,77", "4,93", "3,9 mg/L", "6,825", "97,5", "65,0", "32,5",
+            "**6,2429**", "**5,3250**", "**5,9091**", "42,6", "65,0", "**22**", "**31**", "9 × 2 = 18", "2,49",
+            "6,3333", "versão 16.15", "27 consultas", "**20 linhas**",
+        ):
+            self.assertIn(citacao, texto, citacao)
+
+    def test_numeros_da_prosa_batem_com_os_valores_calculados_pelo_codigo(self):
+        """Cada número abaixo aparece no texto e sai, formatado à brasileira, de um valor que o código do capítulo calculou."""
+        ns, texto = self.ns, self.texto
+
+        def br(x, casas):
+            return f"{x:.{casas}f}".replace(".", ",")
+
+        por_ponto = {linha[0]: linha for linha in ns["fanout_por_ponto"]}          # (ponto, linhas, distintas, soma, media)
+        relatorio = {linha[0]: linha for linha in ns["relatorio_sql"]}             # (ponto, campanhas, medidos, fora, pct)
+        largo = {linha[0]: linha for linha in ns["largo_sql"]}                     # (ponto, od, ph, turbidez)
+        ligados = [
+            (br(por_ponto["P02"][3], 1), "soma de P02 depois do LEFT JOIN"),                        # 29,6
+            (br(ns["soma_certa"]["P02"], 1), "soma certa de P02"),                                  # 14,8
+            (br(por_ponto["P03"][3], 1), "soma de P03 depois do LEFT JOIN"),                        # 13,0
+            (br(ns["media_interna"], 2), "média depois do JOIN interno"),                           # 5,33
+            (br(ns["media_externa"], 2), "média depois do LEFT JOIN"),                              # 5,91
+            (br(relatorio["P02"][4], 0) + "% de conformidade", "conformidade de P02"),              # 50% de conformidade
+            (br(largo["P01"][2], 2), "pH médio de P01"),                                            # 7,03
+            (f"turbidez {br(largo['P01'][3], 1)}", "turbidez média de P01"),                        # turbidez 13,0
+        ]
+        for citado, o_que in ligados:
+            self.assertIn(citado, texto, o_que)
+        # o limiar do ROUND de 2 casas cobre o pior caso (ROUND(0.125, 2) = 0.13) e o capítulo não usa isclose sem tolerância
+        self.assertTrue(math.isclose(0.13, 0.125, abs_tol=ns["TOL_DUAS_CASAS"]))
+        for m in re.finditer(r"^```(?:\{python\}|python)[ \t]*\n(.*?)^```", texto, re.S | re.M):
+            codigo = m.group(1)
+            for achado in re.finditer(r"math\.isclose\(", codigo):
+                nivel, fim = 0, achado.end() - 1
+                for i in range(achado.end() - 1, len(codigo)):
+                    nivel += {"(": 1, ")": -1}.get(codigo[i], 0)
+                    if nivel == 0:
+                        fim = i
+                        break
+                self.assertIn("abs_tol", codigo[achado.start():fim], codigo[achado.start():fim + 1])
+
+
+class EstruturaP107(unittest.TestCase):
+    def test_o_capitulo_tem_as_secoes_do_metodo(self):
+        texto = ler(CAPITULO_107)
+        for secao in ("Erros clássicos", "Exercícios", "Entregável", "Autoavaliação", "Para ir além", "O que foi testado e o que não foi"):
+            self.assertIn(f"## {secao}", texto, f"falta a seção {secao}")
+        self.assertGreaterEqual(texto.count('collapse="true"'), 7)       # seis exercícios e o desafio
+        for nivel in ("Reconheço", "Explico", "Executo", "Ensino"):
+            self.assertIn(nivel, texto)
+        self.assertIn("{#sec-p107}", texto)
+        rotulos = re.findall(r"\{#(sec-[\w-]+)", texto)
+        self.assertTrue(all(r.startswith("sec-p107") for r in rotulos), rotulos)
+        self.assertEqual(len(rotulos), len(set(rotulos)))
+
+    def test_todo_cabecalho_tem_linha_em_branco_antes(self):
+        """O Pandoc só reconhece '## Título' depois de uma linha em branco (ou logo após a abertura de um bloco ':::')."""
+        for caminho in sorted(RAIZ.glob("*.qmd")):
+            dentro, linhas = False, caminho.read_text(encoding="utf-8").split("\n")
+            for i, linha in enumerate(linhas):
+                if linha.startswith("```"):
+                    dentro = not dentro
+                elif not dentro and re.match(r"#{1,6} ", linha) and i > 0:
+                    anterior = linhas[i - 1]
+                    self.assertTrue(anterior.strip() == "" or re.match(r":{3,} *\{", anterior),
+                                    f"{caminho.name}, linha {i + 1}: cabeçalho sem linha em branco antes: {linha}")
+
+    def test_a_figura_tem_rotulo_legenda_texto_alternativo_e_referencia(self):
+        texto = ler(CAPITULO_107)
+        self.assertIn("#| label: fig-p107-fanout", texto)
+        self.assertIn("#| fig-cap:", texto)
+        self.assertIn("#| fig-alt:", texto)
+        self.assertIn("@fig-p107-fanout", texto)
+
+    def test_o_capitulo_declara_a_fonte_dos_limites_e_o_que_nao_conferiu(self):
+        texto = ler(CAPITULO_107)
+        for frase in ("CONAMA", "08/10/2026", "Não conferi", "não foi executado no Windows", "sintético"):
+            self.assertIn(frase, texto, frase)
+
+    def test_o_texto_nao_traz_erros_conhecidos(self):
+        texto = ler(CAPITULO_107)
+        self.assertNotRegex(texto, r"\?\d")                 # `?1` com tupla é descontinuado no Python 3.12
+        for suspeito in ("password=", "senha=", "token=", "ghp_", "api_key"):
+            self.assertNotIn(suspeito, texto.lower())
+
+    def test_quarto_lista_o_capitulo_depois_do_p1_06(self):
+        config = yaml.safe_load(ler("_quarto.yml"))
+        parte_p1 = [item for item in config["book"]["chapters"] if isinstance(item, dict) and item["part"].startswith("P1")][0]
+        self.assertEqual(parte_p1["chapters"], [CAPITULO, CAPITULO_107])
+        self.assertTrue((RAIZ / CAPITULO_107).is_file())
+
+    def test_codigo_sem_barra_invertida_em_expressao_de_fstring(self):
+        """Antes do Python 3.12, uma barra invertida dentro de {...} num f-string é erro de sintaxe (o CI roda a partir do 3.11)."""
+        for m in re.finditer(r"^```(?:\{python\}|python)[ \t]*\n(.*?)^```", ler(CAPITULO_107), re.S | re.M):
+            for g in re.findall(r"""f(?:"[^"\n]*"|'[^'\n]*')""", m.group(1)):
+                for expressao in re.findall(r"\{([^{}]*)\}", g):
+                    self.assertNotIn("\\", expressao, g)
+
+    def test_todo_bloco_python_compila(self):
+        for i, m in enumerate(re.finditer(r"^```(?:\{python\}|python)[ \t]*\n(.*?)^```", ler(CAPITULO_107), re.S | re.M), 1):
+            compile(m.group(1), f"{CAPITULO_107}, bloco {i}", "exec")
 
 
 if __name__ == "__main__":

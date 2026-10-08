@@ -1,0 +1,1465 @@
+# P1-07 · SQL essencial II: agregação e junções {#sec-p107}
+
+::: {.callout-note icon=false}
+## Neste capítulo
+
+**Pergunta que guia tudo:** como eu resumo muitas medições em poucos números, como ligo duas tabelas, e como tenho certeza de que a junção não mudou, em silêncio, o significado da resposta?
+
+**Você vai ser capaz de:**
+
+1. dizer o que são **chave primária**, **chave estrangeira** e **cardinalidade** (um-para-muitos), e por que o SQLite só confere a chave estrangeira se você mandar;
+2. resumir linhas com as funções de agregação `COUNT`, `SUM`, `AVG`, `MIN` e `MAX`, dizendo como cada uma trata o `NULL` e o conjunto vazio;
+3. agrupar com `GROUP BY` e filtrar grupos com `HAVING`, explicando a diferença entre `WHERE` e `HAVING` pela **ordem em que o banco lê a consulta**;
+4. juntar tabelas com `INNER JOIN` e `LEFT JOIN`, prevendo **quais linhas** cada uma mantém;
+5. reconhecer e desarmar as duas armadilhas do capítulo: o filtro no `WHERE` que desfaz um `LEFT JOIN`, e o `JOIN` que **multiplica linhas** e distorce somas e médias sem aviso;
+6. **reconciliar** cada resultado com um cálculo independente em Python e com o pandas (`groupby`, `merge`, `read_sql_query`, `to_sql`), e nomear o que muda entre o SQLite e o PostgreSQL.
+
+**Pré-requisitos:** o P1-06 (@sec-p106), principalmente o `NULL` e a lógica de três valores (@sec-p106-null) e a ordem em que o banco lê um `SELECT` (@sec-p106-select). Para a parte do pandas, o que o P1-04 e o P1-05 ensinam de `DataFrame`; o capítulo usa só o necessário e explica o resto.
+
+**Tempo sugerido:** 4 h, em duas sessões: (1) da @sec-p107-modelo até a @sec-p107-having; (2) da @sec-p107-join até o fim.
+:::
+
+```{python}
+#| label: p107-imports
+#| echo: false
+import math
+import sqlite3
+import statistics
+from collections import Counter
+
+import matplotlib.pyplot as plt
+
+banco = sqlite3.connect(":memory:")  # o banco do capítulo: vive na memória e some quando o programa termina
+conferencias = {}  # cada comparação "SQL contra Python" do capítulo registra aqui o seu resultado
+```
+
+## Da tabela solta às tabelas ligadas {#sec-p107-modelo}
+
+No P1-06, todas as medições moravam em **uma** tabela, `amostra`, e cada linha repetia a unidade (`mg/L`, `UNT`...). Isso funciona para aprender, mas tem três defeitos que aparecem logo que o trabalho cresce:
+
+* **repetição:** a unidade do oxigênio dissolvido está escrita sete vezes; se estiver errada, são sete linhas para corrigir;
+* **falta de lugar para os limites legais:** o mínimo de 5 mg/L era uma constante em Python, fora do banco;
+* **um ponto só existe se tiver amostra:** um ponto cadastrado que **ainda não foi coletado** não aparece em tabela nenhuma.
+
+A saída é separar por assunto: **uma tabela para cada tipo de coisa** e ligá-las por chaves. Aqui teremos quatro.
+
+| Tabela | O que guarda | Uma linha é... |
+|:--|:--|:--|
+| `ponto` | os locais de coleta | um ponto: `P01`, `P02`... |
+| `parametro` | o que se mede, a unidade e os limites legais | um parâmetro: `OD`, `pH`, `turbidez` |
+| `resultado` | as medições (formato longo, como no P1-06) | um parâmetro, num ponto, num dia |
+| `fonte` | as fontes de pressão conhecidas de cada ponto | uma fonte (esgoto tratado, drenagem urbana...) |
+
+E o vocabulário novo, em quatro termos:
+
+| Termo | O que é | No nosso exemplo |
+|:--|:--|:--|
+| **Chave primária** (*primary key*, PK) | a coluna que identifica **uma** linha da tabela, sem repetição | `ponto.codigo` |
+| **Chave estrangeira** (*foreign key*, FK) | uma coluna que guarda a chave primária de **outra** tabela e só aceita valores que existam lá (ou `NULL`, se a coluna permitir) | `resultado.ponto` aponta para `ponto.codigo` |
+| **Cardinalidade** | quantas linhas de um lado correspondem a uma linha do outro | um ponto tem **muitos** resultados |
+| **Junção** (*join*) | combinar linhas de duas tabelas pela chave | juntar `resultado` e `parametro` pelo código do parâmetro |
+
+As ligações do nosso banco, com a cardinalidade de cada uma:
+
+```text
+  ponto (1) ──────< (N) resultado (N) >────── (1) parametro
+    │
+    └────────────< (N) fonte
+```
+
+O "1" e o "N" dizem quantas linhas ficam de cada lado: **um** ponto para **muitos** resultados; **um** parâmetro para **muitos** resultados; **um** ponto para **muitas** fontes. Em todas, a chave estrangeira mora no lado "muitos" (`resultado.ponto`, `resultado.parametro`, `fonte.ponto`).
+
+**E o muitos-para-muitos?** Uma chave estrangeira comum produz uma relação um-para-muitos (se a coluna da chave estrangeira também for `UNIQUE`, cada linha de um lado tem no máximo uma do outro, e a relação vira um-para-um). O muitos-para-muitos de verdade (uma fonte que afeta vários pontos **e** um ponto com várias fontes) pede uma terceira tabela, a *tabela associativa* (por exemplo, `ponto_fonte`), que o capítulo não constrói. O que vamos encontrar é a versão **acidental**: juntar duas tabelas "filhas" (`resultado` e `fonte`) pela chave do "pai" (`ponto`). Nenhum dos dois lados tem a chave única, e a junção multiplica linhas. É o erro clássico do módulo e tem seção própria (@sec-p107-fanout).
+
+## Convenções deste capítulo {#sec-p107-convencoes}
+
+Valem todas as convenções do P1-06 (@sec-p106-convencoes): datas em ISO 8601, ausente é `NULL` e nunca `0`, aspas simples para texto, valores por parâmetro (`?` ou `:nome`), limites em constantes nomeadas. Acrescentamos as deste capítulo (regra 4 do método):
+
+| Assunto | Convenção | Por quê |
+|:--|:--|:--|
+| Limite ausente | `NULL` em `minimo` ou `maximo` quer dizer **"sem limite desse lado"** | o OD só tem mínimo e a turbidez só tem máximo; com `NULL`, uma comparação nunca é verdadeira, e ninguém "viola" um limite que não existe |
+| Resultado ausente | `valor` é `NULL` (o frasco perdido do P1-06) | ausente não é zero |
+| Apelidos de tabela | `po` (ponto), `p` (parametro), `r` (resultado), `f` (fonte), sempre escritos nas colunas de um `JOIN` (`r.ponto`) | evita ambiguidade e deixa claro de onde vem cada coluna |
+| Nome da chave estrangeira | o nome da tabela que ela **referencia** (`resultado.ponto` referencia `ponto`) | quem lê o `JOIN` entende a ligação |
+| Cálculo de conferência | em Python, sobre as **listas originais**, nunca sobre o banco | uma segunda conta independente (regra 3 do método) |
+| Comparação de números reais | `math.isclose` com tolerância declarada, e **não** `==` | médias têm casas decimais binárias; o `round` do Python e o `ROUND` do SQL arredondam metades de modos diferentes |
+
+E a versão do SQLite que está rodando aqui:
+
+```{python}
+#| label: p107-versao
+print("SQLite", sqlite3.sqlite_version)
+```
+
+(Este capítulo foi escrito e testado com a versão 3.45.1; no seu computador pode aparecer outra. Onde a versão importa, o texto avisa.)
+
+## Os dados: os mesmos 20 resultados, agora em quatro tabelas {#sec-p107-dados}
+
+Reaproveitamos a campanha do P1-06: três pontos com resultados, três campanhas (fevereiro, maio e agosto de 2024) e três parâmetros. **Tudo é sintético: nenhum número foi medido em rio algum.** Há duas novidades: um quarto ponto, **P04**, que está cadastrado mas ainda não teve coleta (para o `LEFT JOIN` ter o que mostrar), e a lista de **fontes de pressão**, também inventada, que servirá para provocar o erro do módulo.
+
+Os limites são os da classe 2 de águas doces da Resolução CONAMA nº 357/2005 (arts. 14 e 15), os mesmos do P1-06: OD "não inferior a 5 mg/L", pH de 6,0 a 9,0 e turbidez "até 100 UNT" (texto consultado em 08/10/2026 na cópia da CETESB, licenciamento.cetesb.sp.gov.br/legislacao/federal/resolucoes/2005_Res_CONAMA_357.pdf). **Não conferi** se resoluções posteriores (410/2009 e 430/2011) alteraram esses itens; confira a versão consolidada antes de usar estes limites em trabalho real.
+
+```{python}
+#| label: p107-dados
+# Limites da classe 2 de águas doces (Resolução CONAMA 357/2005, arts. 14 e 15), os mesmos do P1-06 (consulta de 08/10/2026)
+OD_MINIMO_MG_L = 5.0         # oxigênio dissolvido, mínimo em qualquer amostra (mg/L de O2)
+PH_MINIMO = 6.0              # pH, faixa permitida
+PH_MAXIMO = 9.0
+TURBIDEZ_MAXIMA_UNT = 100.0  # turbidez, máximo (UNT)
+
+PONTOS = [  # (codigo, descricao)
+    ("P01", "montante do lançamento"),
+    ("P02", "jusante do lançamento"),
+    ("P03", "afluente"),
+    ("P04", "cadastrado, ainda sem coleta"),
+]
+PARAMETROS = [  # (codigo, unidade, minimo, maximo); None = sem limite desse lado
+    ("OD", "mg/L", OD_MINIMO_MG_L, None),
+    ("pH", "adim.", PH_MINIMO, PH_MAXIMO),
+    ("turbidez", "UNT", None, TURBIDEZ_MAXIMA_UNT),
+]
+RESULTADOS = [  # (ponto, data, parametro, valor); None = sem resultado
+    ("P01", "2024-02-20", "OD", 7.8),
+    ("P01", "2024-02-20", "pH", 7.2),
+    ("P01", "2024-02-20", "turbidez", 18.0),
+    ("P02", "2024-02-20", "OD", 6.1),
+    ("P02", "2024-02-20", "pH", 6.8),
+    ("P02", "2024-02-20", "turbidez", 135.0),
+    ("P01", "2024-05-14", "OD", 7.5),
+    ("P01", "2024-05-14", "pH", 7.0),
+    ("P01", "2024-05-14", "turbidez", 12.0),
+    ("P02", "2024-05-14", "OD", 4.8),
+    ("P02", "2024-05-14", "pH", 6.3),
+    ("P02", "2024-05-14", "turbidez", 60.0),
+    ("P01", "2024-08-13", "OD", 7.1),
+    ("P01", "2024-08-13", "pH", 6.9),
+    ("P01", "2024-08-13", "turbidez", 9.0),
+    ("P02", "2024-08-13", "OD", 3.9),
+    ("P02", "2024-08-13", "pH", 5.8),
+    ("P02", "2024-08-13", "turbidez", None),  # frasco perdido: sem resultado
+    ("P03", "2024-08-13", "OD", 6.5),
+    ("P03", "2024-08-13", "pH", 7.4),
+]
+FONTES = [  # (ponto, tipo): fontes de pressão conhecidas (inventadas)
+    ("P02", "lançamento de esgoto tratado"),
+    ("P02", "drenagem urbana"),
+    ("P03", "drenagem rural"),
+    ("P03", "pecuária"),
+]
+print(len(PONTOS), "pontos;", len(PARAMETROS), "parâmetros;", len(RESULTADOS), "resultados;", len(FONTES), "fontes")
+```
+
+## Chaves estrangeiras: o SQLite só confere se você mandar {#sec-p107-chaves}
+
+Declarar `REFERENCES ponto (codigo)` diz ao banco que `resultado.ponto` só pode guardar um código que exista em `ponto`. Mas, **no SQLite, essa conferência vem desligada**. A documentação (*SQLite Foreign Key Support*, sqlite.org/foreignkeys.html, consultada em 08/10/2026) diz que as restrições de chave estrangeira "are disabled by default (for backwards compatibility), so must be enabled separately for each database connection": ou seja, é preciso ligar **a cada conexão**, com `PRAGMA foreign_keys = ON`. Veja num banco de teste:
+
+```{python}
+#| label: p107-fk-lab
+def tentar(conexao, sql, parametros=()):
+    """Tenta executar e mostra se a linha ENTROU ou foi RECUSADA, com a mensagem do banco."""
+    try:
+        conexao.execute(sql, parametros)
+        return "ENTROU"
+    except sqlite3.Error as erro:
+        return f"RECUSADO ({erro})"
+
+
+lab = sqlite3.connect(":memory:")
+lab.executescript("""
+CREATE TABLE ponto (codigo TEXT NOT NULL PRIMARY KEY);
+CREATE TABLE resultado (id INTEGER PRIMARY KEY, ponto TEXT REFERENCES ponto (codigo), valor REAL);
+""")
+fk_padrao = lab.execute("PRAGMA foreign_keys").fetchone()[0]
+orfao_sem_fk = tentar(lab, "INSERT INTO resultado (ponto, valor) VALUES ('PX', 1.0)")  # PX não existe em ponto
+lab.commit()
+lab.execute("PRAGMA foreign_keys = ON")
+fk_ligada = lab.execute("PRAGMA foreign_keys").fetchone()[0]
+orfao_com_fk = tentar(lab, "INSERT INTO resultado (ponto, valor) VALUES ('PY', 1.0)")
+orfaos_antigos = lab.execute("PRAGMA foreign_key_check").fetchall()
+lab.close()
+
+# o PRAGMA não faz efeito no meio de uma transação (a documentação diz: "simply has no effect")
+dentro = sqlite3.connect(":memory:")
+dentro.execute("BEGIN")
+dentro.execute("PRAGMA foreign_keys = ON")
+fk_dentro_de_transacao = dentro.execute("PRAGMA foreign_keys").fetchone()[0]
+dentro.close()
+
+print("foreign_keys numa conexão nova:        ", fk_padrao)
+print("gravar resultado de ponto inexistente:  ", orfao_sem_fk)
+print("foreign_keys depois de ligar:          ", fk_ligada)
+print("gravar outro ponto inexistente:         ", orfao_com_fk)
+print("órfãos que ficaram de antes:            ", orfaos_antigos)
+print("ligar dentro de uma transação deixa:   ", fk_dentro_de_transacao)
+```
+
+Como ler:
+
+* Com a chave desligada (o padrão), o resultado do ponto `PX`, que **não existe**, entrou sem reclamação. Esse registro "órfão" é um erro silencioso: mais tarde, um `JOIN` não o encontra e ele some da conta.
+* Depois do `PRAGMA foreign_keys = ON`, o mesmo tipo de gravação é **recusado** (`FOREIGN KEY constraint failed`).
+* Ligar a conferência **não corrige** o órfão que já estava lá. Para procurar quem ficou órfão, existe o `PRAGMA foreign_key_check`: a linha devolvida diz a tabela (`resultado`), o `rowid` da linha (1), a tabela-pai (`ponto`) e qual chave estrangeira falhou (a de número 0).
+* A ordem importa: ligar **antes** de começar uma transação. Dentro de uma, o `PRAGMA` é ignorado, sem erro.
+
+**A regra deste livro:** toda conexão a um banco SQLite começa com `PRAGMA foreign_keys = ON`. Outros bancos, como o PostgreSQL, conferem a chave estrangeira sempre (a @sec-p107-dialetos traz o registro).
+
+## Criar as tabelas e inserir os dados {#sec-p107-tabelas}
+
+Primeiro o esquema. As restrições que você já conhece do P1-06 (`NOT NULL`, `CHECK`, chave primária) continuam valendo; as novidades são a chave estrangeira (`REFERENCES`) e o `NOT NULL` junto da chave primária de texto.
+
+```{python}
+#| label: p107-tabelas
+banco.execute("PRAGMA foreign_keys = ON")  # primeiro de tudo, a cada conexão
+banco.executescript("""
+CREATE TABLE ponto (
+    codigo    TEXT NOT NULL PRIMARY KEY,
+    descricao TEXT NOT NULL
+);
+CREATE TABLE parametro (
+    codigo  TEXT NOT NULL PRIMARY KEY,
+    unidade TEXT NOT NULL,
+    minimo  REAL,
+    maximo  REAL
+);
+CREATE TABLE resultado (
+    id        INTEGER PRIMARY KEY,
+    ponto     TEXT NOT NULL REFERENCES ponto (codigo),
+    data      TEXT NOT NULL CHECK (date(data) IS data),
+    parametro TEXT NOT NULL REFERENCES parametro (codigo),
+    valor     REAL CHECK (valor IS NULL OR typeof(valor) IN ('real', 'integer'))
+);
+CREATE TABLE fonte (
+    id    INTEGER PRIMARY KEY,
+    ponto TEXT NOT NULL REFERENCES ponto (codigo),
+    tipo  TEXT NOT NULL
+);
+""")
+print("tabelas no banco:", [linha[0] for linha in banco.execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")])
+print("conferência de chave estrangeira ligada:", banco.execute("PRAGMA foreign_keys").fetchone()[0])
+```
+
+Linha por linha, só o que é novo:
+
+* `ponto TEXT NOT NULL REFERENCES ponto (codigo)`: a coluna `resultado.ponto` guarda um código de ponto e **só aceita um que exista** em `ponto.codigo`. O mesmo vale para `parametro` e, em `fonte`, para `ponto`.
+* `codigo TEXT NOT NULL PRIMARY KEY`: o `NOT NULL` repetido não é enfeite. Por um desvio histórico do SQLite, a chave primária de **texto** aceita `NULL` se você não proibir (a documentação, *CREATE TABLE*, sqlite.org/lang_createtable.html, fala nisso). O teste logo abaixo mostra.
+* O `id INTEGER PRIMARY KEY` de `resultado` e de `fonte` é o mesmo do P1-06: numerado sozinho.
+
+```{python}
+#| label: p107-pk-nulo
+lab = sqlite3.connect(":memory:")
+lab.execute("CREATE TABLE sem_not_null (codigo TEXT PRIMARY KEY)")
+lab.execute("CREATE TABLE com_not_null (codigo TEXT NOT NULL PRIMARY KEY)")
+pk_nulo = {
+    "sem NOT NULL": tentar(lab, "INSERT INTO sem_not_null VALUES (NULL)"),
+    "com NOT NULL": tentar(lab, "INSERT INTO com_not_null VALUES (NULL)"),
+}
+lab.close()
+for rotulo, resposta in pk_nulo.items():
+    print(f"{rotulo}: {resposta}")
+```
+
+Sem o `NOT NULL`, a chave primária de texto aceitou `NULL`: uma "chave" que não identifica nada. (No PostgreSQL, a chave primária já implica `NOT NULL`; o registro está na @sec-p107-dialetos.)
+
+Agora os dados. A **ordem importa**: com as chaves estrangeiras ligadas, não dá para inserir um resultado antes do ponto e do parâmetro a que ele se refere. Primeiro os "pais" (`ponto`, `parametro`), depois os "filhos" (`resultado`, `fonte`). Os `?` são parâmetros, como no P1-06.
+
+```{python}
+#| label: p107-inserir
+banco.executemany("INSERT INTO ponto (codigo, descricao) VALUES (?, ?)", PONTOS)
+banco.executemany("INSERT INTO parametro (codigo, unidade, minimo, maximo) VALUES (?, ?, ?, ?)", PARAMETROS)
+banco.executemany("INSERT INTO resultado (ponto, data, parametro, valor) VALUES (?, ?, ?, ?)", RESULTADOS)
+banco.executemany("INSERT INTO fonte (ponto, tipo) VALUES (?, ?)", FONTES)
+banco.commit()  # encerra a transação aberta pelos INSERT e grava de fato
+for tabela in ("ponto", "parametro", "resultado", "fonte"):  # os nomes aqui são nossos, escritos no código (nunca de um usuário)
+    print(f"{tabela:10} {banco.execute(f'SELECT COUNT(*) FROM {tabela}').fetchone()[0]} linhas")
+```
+
+Para ver as consultas como tabela de texto, a mesma função do P1-06:
+
+```{python}
+#| label: p107-mostrar
+#| code-fold: true
+#| code-summary: "Ver a função mostrar()"
+def mostrar(sql, parametros=()):
+    """Roda a consulta, imprime o resultado como tabela de texto e devolve a lista de linhas (tuplas)."""
+    cursor = banco.execute(sql, parametros)
+    linhas = cursor.fetchall()
+    colunas = [c[0] for c in cursor.description]
+    texto = [["NULL" if v is None else str(v) for v in linha] for linha in linhas]
+    larguras = [max([len(c)] + [len(t[i]) for t in texto]) for i, c in enumerate(colunas)]
+    print("  ".join(c.ljust(w) for c, w in zip(colunas, larguras)))
+    print("  ".join("-" * w for w in larguras))
+    for t in texto:
+        print("  ".join(v.ljust(w) for v, w in zip(t, larguras)))
+    print(f"({len(linhas)} linha{'s' if len(linhas) != 1 else ''})")
+    return linhas
+```
+
+Para comparar o resultado do SQL com o do Python, duas tolerâncias nomeadas (regra 6 do método) e uma função que compara listas de tuplas:
+
+```{python}
+#| label: p107-tolerancias
+TOL_EXATA = 1e-9        # números que o SQL e o Python calculam sem arredondar
+TOL_DUAS_CASAS = 0.0051  # número que o SQL arredondou para 2 casas (ROUND(x, 2)) contra o valor sem arredondar:
+                         # meia unidade da 2ª casa (0,005) mais folga, pois ROUND(0.125, 2) dá 0.13 e a diferença é 0.0050000000000000044
+```
+
+```{python}
+#| label: p107-mesmas-linhas
+#| code-fold: true
+#| code-summary: "Ver a função mesmas_linhas()"
+def mesmas_linhas(linhas_a, linhas_b, tol=TOL_EXATA):
+    """Compara duas listas de tuplas: texto, inteiros e None por igualdade; números reais por math.isclose."""
+    if len(linhas_a) != len(linhas_b):
+        return False
+    for tupla_a, tupla_b in zip(linhas_a, linhas_b):
+        if len(tupla_a) != len(tupla_b):
+            return False
+        for a, b in zip(tupla_a, tupla_b):
+            if isinstance(a, float) or isinstance(b, float):
+                if a is None or b is None or not math.isclose(a, b, abs_tol=tol):
+                    return False
+            elif a != b:
+                return False
+    return True
+```
+
+E a proteção funciona nos dois sentidos: nem um resultado de ponto inexistente entra, nem um ponto que ainda tem resultados pode ser apagado (o padrão do SQLite, `NO ACTION`, recusa). As duas tentativas abaixo são recusadas e **não mudam o banco**:
+
+```{python}
+#| label: p107-fk-recusas
+recusa_filho = tentar(banco, "INSERT INTO resultado (ponto, data, parametro, valor) VALUES ('PX', '2024-09-01', 'OD', 6.0)")
+recusa_pai = tentar(banco, "DELETE FROM ponto WHERE codigo = 'P01'")
+print("resultado de ponto inexistente:", recusa_filho)
+print("apagar ponto que tem resultados:", recusa_pai)
+banco.rollback()  # o Python abre uma transação sozinha antes de um INSERT ou DELETE; encerramos a que ficou aberta
+print("resultados no banco continuam:", banco.execute("SELECT COUNT(*) FROM resultado").fetchone()[0])
+```
+
+O `rollback()` encerra a transação que o Python abriu por conta própria antes do `INSERT` e do `DELETE` recusados. Sem ele, ela ficaria aberta, e a cópia do banco que faremos adiante (`banco.backup(...)`) ficaria **esperando para sempre**: testei, e com a transação aberta a cópia não terminou.
+
+## Funções de agregação {#sec-p107-agregacao}
+
+Uma **função de agregação** recebe **muitas linhas** e devolve **um valor**. São cinco as essenciais:
+
+| Função | Devolve | Como trata o `NULL` |
+|:--|:--|:--|
+| `COUNT(*)` | o número de **linhas** | conta a linha mesmo que tudo nela seja `NULL` |
+| `COUNT(coluna)` | o número de linhas em que a coluna **tem valor** | deixa de fora os `NULL` |
+| `SUM(coluna)` | a soma | ignora os `NULL`; se não sobrar nenhum valor, devolve `NULL` (não `0`) |
+| `AVG(coluna)` | a média | ignora os `NULL`: divide pela quantidade de **valores**, não de linhas |
+| `MIN(coluna)`, `MAX(coluna)` | o menor e o maior | ignoram os `NULL` |
+
+(A documentação, *Aggregate Functions*, sqlite.org/lang_aggfunc.html, consultada em 08/10/2026, confirma: "The avg() function returns the average value of all non-NULL X within a group", e que `sum()` devolve `NULL` quando não há nenhum valor. O SQLite tem ainda `TOTAL()`, que se comporta como `SUM()` mas devolve `0.0` no conjunto vazio; ela não existe no PostgreSQL.)
+
+A turbidez é a boa cobaia: ela tem **uma** análise sem resultado (P02, agosto).
+
+```{python}
+#| label: p107-agregados
+sql_turbidez = """
+SELECT COUNT(*)     AS linhas,
+       COUNT(valor) AS com_valor,
+       SUM(valor)   AS soma,
+       AVG(valor)   AS media,
+       MIN(valor)   AS menor,
+       MAX(valor)   AS maior
+FROM resultado
+WHERE parametro = 'turbidez'
+"""
+agregados_sql = mostrar(sql_turbidez)[0]
+
+valores_turbidez = [v for _p, _d, par, v in RESULTADOS if par == "turbidez"]
+medidos_turbidez = [v for v in valores_turbidez if v is not None]
+agregados_python = (len(valores_turbidez), len(medidos_turbidez), sum(medidos_turbidez),
+                    sum(medidos_turbidez) / len(medidos_turbidez), min(medidos_turbidez), max(medidos_turbidez))
+conferencias["agregados"] = mesmas_linhas([agregados_sql], [agregados_python])
+print("SQL e Python concordam:", conferencias["agregados"])
+```
+
+São 6 análises de turbidez, mas só **5** têm resultado, e a soma dos 5 é 234,0. A média é **46,8**: 234,0 dividido por 5, e não por 6. O `AVG` ignorou o ausente, e isso é o certo: um frasco perdido não é uma turbidez zero. O erro clássico é fazer a conta que parece natural:
+
+```{python}
+#| label: p107-media-ingenua
+media_certa, media_zero = banco.execute("SELECT AVG(valor), AVG(COALESCE(valor, 0)) FROM resultado WHERE parametro = 'turbidez'").fetchone()
+soma_sobre_linhas = banco.execute("SELECT SUM(valor) / COUNT(*) FROM resultado WHERE parametro = 'turbidez'").fetchone()[0]
+print(f"AVG(valor), ignora o ausente:        {media_certa:.1f}")
+print(f"AVG(COALESCE(valor, 0)), ausente = 0: {media_zero:.1f}")
+print(f"SUM(valor) / COUNT(*), divide por 6:  {soma_sobre_linhas:.1f}")
+conferencias["media_ingenua"] = (math.isclose(media_certa, 234.0 / 5, abs_tol=TOL_EXATA)
+                                 and math.isclose(media_zero, 234.0 / 6, abs_tol=TOL_EXATA)
+                                 and math.isclose(soma_sobre_linhas, 234.0 / 6, abs_tol=TOL_EXATA))
+print("as contas conferem com 234/5 e 234/6:", conferencias["media_ingenua"])
+```
+
+As duas contas "ingênuas" (trocar o ausente por zero, ou dividir a soma pelo número de **linhas**) dão **39,0** e subestimam a turbidez em quase 8 UNT. O banco não avisa. Toda vez que escrever `AVG`, pergunte: quantos valores entram, e eu quero mesmo ignorar os ausentes?
+
+Mais duas pegadinhas, que valem para qualquer agregação:
+
+```{python}
+#| label: p107-agregados-armadilhas
+# 1) agregar sem separar por parâmetro mistura mg/L, pH e UNT: o SQL calcula, mas o número não significa nada
+media_de_tudo = banco.execute("SELECT AVG(valor) FROM resultado").fetchone()[0]
+print(f"AVG(valor) de tudo: {media_de_tudo:.4f}  (mistura mg/L, adimensional e UNT)")
+
+# 2) conjunto vazio: contagem 0; soma e média NULL
+vazio_sql = banco.execute("SELECT COUNT(*), COUNT(valor), SUM(valor), AVG(valor), TOTAL(valor) FROM resultado WHERE parametro = 'salinidade'").fetchone()
+print("parâmetro sem nenhuma linha (COUNT(*), COUNT(valor), SUM, AVG, TOTAL):", vazio_sql)
+print("Python, sum([]):", sum([]))
+try:
+    statistics.mean([])
+except statistics.StatisticsError as erro:
+    print("Python, statistics.mean([]): ERRO:", erro)
+conferencias["vazio"] = vazio_sql == (0, 0, None, None, 0.0)
+
+# 3) COUNT(DISTINCT ...) conta valores diferentes, não linhas
+campanhas = banco.execute("SELECT COUNT(DISTINCT data) FROM resultado").fetchone()[0]
+print("campanhas (datas diferentes):", campanhas, "| linhas:", banco.execute("SELECT COUNT(*) FROM resultado").fetchone()[0])
+conferencias["campanhas"] = campanhas == len({d for _p, d, _par, _v in RESULTADOS}) == 3
+```
+
+1. A "média de tudo" (17,1105) é calculada sem reclamação, e **não significa nada**: junta miligramas por litro, pH e UNT. Sempre agregue **por parâmetro** (é o que o `GROUP BY` faz, a seguir).
+2. Um conjunto vazio tem `COUNT` igual a 0, mas `SUM` e `AVG` são `NULL`, e o `TOTAL` do SQLite é `0.0`. No Python, `sum([])` é `0` e `statistics.mean([])` dá erro. Quem ler o `NULL` como zero erra; quem esquecer de tratá-lo, também.
+3. `COUNT(DISTINCT data)` conta as **datas diferentes** (3 campanhas), não as 20 linhas. Guarde esse `DISTINCT`, porque ele será um remendo tentador na @sec-p107-fanout.
+
+## Agrupar: GROUP BY {#sec-p107-grupos}
+
+Sem `GROUP BY`, um agregado resume a tabela inteira em **uma** linha. O `GROUP BY` separa as linhas em **grupos**, um para cada valor da coluna indicada, e aplica o agregado a cada grupo: o resultado tem **uma linha por grupo**.
+
+Seguindo a regra 2 do método (construir a ferramenta uma vez, a partir da definição, antes de usar a pronta), começamos pelo agrupamento feito à mão em Python, que também será a nossa conferência independente:
+
+```{python}
+#| label: p107-agrupar
+def agrupar(registros, chave, valor):
+    """GROUP BY feito à mão: separa os registros em montes pela chave e devolve {chave: [valores]}."""
+    montes = {}
+    for registro in registros:
+        montes.setdefault(chave(registro), []).append(valor(registro))
+    return montes
+
+
+# cada resultado é (ponto, data, parametro, valor): a chave é o parâmetro (posição 2) e o valor, a posição 3
+por_parametro_python = agrupar(RESULTADOS, chave=lambda r: r[2], valor=lambda r: r[3])
+print({parametro: len(valores) for parametro, valores in por_parametro_python.items()})
+```
+
+Agora a mesma pergunta em SQL: para cada parâmetro, quantas linhas, quantas com valor, a média, o menor e o maior.
+
+```{python}
+#| label: p107-por-parametro
+sql_por_parametro = """
+SELECT parametro,
+       COUNT(*)             AS linhas,
+       COUNT(valor)         AS medidos,
+       ROUND(AVG(valor), 2) AS media,
+       MIN(valor)           AS menor,
+       MAX(valor)           AS maior
+FROM resultado
+GROUP BY parametro
+ORDER BY parametro
+"""
+por_parametro_sql = mostrar(sql_por_parametro)
+
+por_parametro_conta = []
+for parametro in sorted(por_parametro_python):
+    medidos = [v for v in por_parametro_python[parametro] if v is not None]
+    por_parametro_conta.append((parametro, len(por_parametro_python[parametro]), len(medidos),
+                                statistics.mean(medidos), min(medidos), max(medidos)))
+conferencias["por_parametro"] = mesmas_linhas(por_parametro_sql, por_parametro_conta, tol=TOL_DUAS_CASAS)
+print("SQL e Python concordam:", conferencias["por_parametro"])
+```
+
+Leia a tabela: o **oxigênio dissolvido** tem 7 resultados, média de 6,24 mg/L, de 3,9 a 7,8. O **pH**, 7 resultados, média de 6,77. A **turbidez** tem 6 linhas mas só 5 medidos (a análise perdida), e sua média, 46,8 UNT, é a de antes. Agora cada média está num parâmetro só, com sentido. (O `ROUND(..., 2)` é só para mostrar; a conferência usa a tolerância `TOL_DUAS_CASAS` por isso.)
+
+Agrupar por **ponto**, só para o oxigênio. Repare que o `WHERE` vem **antes** do `GROUP BY`: ele escolhe as linhas que serão agrupadas.
+
+```{python}
+#| label: p107-od-por-ponto
+sql_od_por_ponto = """
+SELECT ponto,
+       COUNT(*)             AS n,
+       ROUND(AVG(valor), 2) AS media
+FROM resultado
+WHERE parametro = 'OD'
+GROUP BY ponto
+ORDER BY ponto
+"""
+od_por_ponto_sql = mostrar(sql_od_por_ponto)
+
+od_por_ponto_python = agrupar([r for r in RESULTADOS if r[2] == "OD"], chave=lambda r: r[0], valor=lambda r: r[3])
+od_por_ponto_conta = [(p, len(v), statistics.mean(v)) for p, v in sorted(od_por_ponto_python.items())]
+conferencias["od_por_ponto"] = mesmas_linhas(od_por_ponto_sql, od_por_ponto_conta, tol=TOL_DUAS_CASAS)
+print("SQL e Python concordam:", conferencias["od_por_ponto"])
+```
+
+P01 e P02 têm 3 resultados de OD cada; P03, **um só**. Guarde isso: a média de P02 (4,93 mg/L) está abaixo do mínimo de 5, e a de P03 (6,5) é uma média de um valor só.
+
+### A regra da coluna solta
+
+Em um `SELECT` com `GROUP BY`, cada coluna da lista deve estar **no `GROUP BY` ou dentro de um agregado**. Se não está, a pergunta não tem resposta única: "o `valor` do ponto P01" não existe, há três. O SQLite, **tolerante demais**, aceita e escolhe um valor sem avisar:
+
+```{python}
+#| label: p107-coluna-solta
+solta = banco.execute("SELECT ponto, valor FROM resultado GROUP BY ponto ORDER BY ponto").fetchall()
+valores_por_ponto = agrupar(RESULTADOS, chave=lambda r: r[0], valor=lambda r: r[3])
+print("o SQLite devolveu", len(solta), "linhas, uma por ponto, cada uma com um 'valor' à escolha dele:")
+print(solta)
+conferencias["coluna_solta"] = all(valor in valores_por_ponto[ponto] for ponto, valor in solta)
+print("cada valor devolvido pertence ao seu grupo (mas qual deles, o banco não diz):", conferencias["coluna_solta"])
+```
+
+A documentação (*SELECT*, sqlite.org/lang_select.html, consultada em 08/10/2026) diz que, nesse caso, o valor vem de "one of the input rows that form the aggregate", e que a maioria dos outros bancos recusa. Há uma exceção documentada, com exatamente **um** `MIN()` ou `MAX()` na consulta (a coluna solta vem da linha do mínimo ou do máximo), mas não construa nada em cima disso. No PostgreSQL esta consulta é um **erro** (a @sec-p107-dialetos traz o registro). Escreva sempre as colunas completas, e o código roda nos dois.
+
+### O NULL também forma um grupo
+
+Na lógica de três valores (@sec-p106-null), `NULL = NULL` é desconhecido. Já o `GROUP BY` trata todos os `NULL` como **iguais** e os junta num grupo só:
+
+```{python}
+#| label: p107-grupo-null
+grupos_turbidez = mostrar("""
+SELECT valor, COUNT(*) AS linhas
+FROM resultado
+WHERE parametro = 'turbidez'
+GROUP BY valor
+ORDER BY valor
+""")
+conferencias["grupo_null"] = dict(grupos_turbidez) == dict(Counter(valores_turbidez))
+print("o grupo NULL existe e tem 1 linha:", dict(grupos_turbidez).get(None) == 1, "| confere com Counter:", conferencias["grupo_null"])
+```
+
+Cada turbidez é única, então cada grupo tem uma linha, e o ausente aparece como um grupo à parte (no topo, porque o SQLite põe o `NULL` primeiro numa ordenação crescente; o PostgreSQL o põe no fim, como vimos no P1-06). No pandas, o comportamento é outro, como veremos na @sec-p107-pandas.
+
+## WHERE ou HAVING? {#sec-p107-having}
+
+A diferença entre os dois é a **ordem em que o banco lê a consulta**. Pense assim (é a ordem lógica; o otimizador pode executar de outro jeito, desde que o resultado seja o mesmo):
+
+| Passo | Cláusula | O que faz |
+|:--|:--|:--|
+| 1 | `FROM` e `JOIN` | monta o conjunto de linhas de partida |
+| 2 | `WHERE` | descarta **linhas** |
+| 3 | `GROUP BY` | forma os grupos |
+| 4 | agregados e `HAVING` | calcula `COUNT`, `AVG`... de cada grupo e descarta **grupos** |
+| 5 | `SELECT` | calcula as colunas do resultado (os apelidos nascem aqui) |
+| 6 | `DISTINCT`, `ORDER BY`, `LIMIT` | arruma o resultado |
+
+Duas consequências. **Primeira:** no passo 2, os grupos ainda não existem; logo o `WHERE` **não pode** conter um agregado (o código abaixo mostra o erro). **Segunda:** o `HAVING` só faz sentido sobre o que existe depois do agrupamento, isto é, agregados e colunas do `GROUP BY`.
+
+```{python}
+#| label: p107-having
+sql_having = """
+SELECT ponto,
+       COUNT(*)             AS n,
+       ROUND(AVG(valor), 2) AS media
+FROM resultado
+WHERE parametro = 'OD'
+GROUP BY ponto
+HAVING AVG(valor) < ?
+"""
+print("OD mínimo:", OD_MINIMO_MG_L, "mg/L")
+having_sql = mostrar(sql_having, (OD_MINIMO_MG_L,))
+having_python = [(p, len(v), statistics.mean(v)) for p, v in sorted(od_por_ponto_python.items())
+                 if statistics.mean(v) < OD_MINIMO_MG_L]
+conferencias["having"] = mesmas_linhas(having_sql, having_python, tol=TOL_DUAS_CASAS)
+print("SQL e Python concordam:", conferencias["having"])
+
+# a mesma ideia no lugar errado: agregado no WHERE
+erro_agregado_no_where = tentar(banco, "SELECT ponto FROM resultado WHERE AVG(valor) < ? GROUP BY ponto", (OD_MINIMO_MG_L,))
+print("AVG no WHERE:", erro_agregado_no_where)
+```
+
+Só **P02** tem média de OD abaixo do mínimo. E o `AVG` dentro do `WHERE` é recusado pelo SQLite com `misuse of aggregate: AVG()`: no passo 2 não há média para comparar. (O PostgreSQL também recusa, com outra mensagem.)
+
+Outro uso típico do `HAVING` é exigir um **tamanho mínimo de amostra**: não confiar numa média feita com um valor só. O mínimo vira uma constante nomeada (regra 6 do método), e o mesmo valor vai para o SQL, por parâmetro, e para a conferência em Python:
+
+```{python}
+#| label: p107-having-contagem
+AMOSTRAS_MINIMAS = 2  # decisão do analista: abaixo disso, não se publica média
+sql_minimo_amostras = """
+SELECT ponto, COUNT(valor) AS medidos, ROUND(AVG(valor), 2) AS media
+FROM resultado
+WHERE parametro = 'OD'
+GROUP BY ponto
+HAVING COUNT(valor) >= ?
+ORDER BY ponto
+"""
+minimo_sql = mostrar(sql_minimo_amostras, (AMOSTRAS_MINIMAS,))
+minimo_python = [(p, len(v), statistics.mean(v)) for p, v in sorted(od_por_ponto_python.items()) if len(v) >= AMOSTRAS_MINIMAS]
+conferencias["having_contagem"] = mesmas_linhas(minimo_sql, minimo_python, tol=TOL_DUAS_CASAS)
+print("SQL e Python concordam:", conferencias["having_contagem"])
+```
+
+P03 (um único OD) fica de fora. E uma regra de ouro para decidir onde cada condição vai: **uma condição sobre a linha (parâmetro, data, ponto) vai no `WHERE`; uma condição sobre um agregado vai no `HAVING`.** Não escreva `HAVING parametro = 'OD'` num agrupamento por `ponto`: `parametro` não é nem agregado nem coluna do `GROUP BY`. O PostgreSQL recusa. O SQLite **aceita** e usa o `parametro` de uma linha qualquer de cada grupo; nestes dados, as três linhas de `GROUP BY ponto` passam, com os agregados calculados sobre **todos** os parâmetros misturados, sem aviso (a @sec-p107-dialetos traz o registro). Se o filtro é sobre a linha, ele vai no `WHERE`.
+
+### Escolher o agregado é escolher a pergunta
+
+A Resolução diz que o OD não pode ser inferior a 5 mg/L **em qualquer amostra**. A pergunta legal, portanto, não é "a **média** ficou abaixo?", e sim "**alguma** amostra ficou abaixo?". Essa pergunta se faz com o `MIN`:
+
+```{python}
+#| label: p107-min-ou-media
+sql_alguma_abaixo = """
+SELECT ponto, COUNT(*) AS amostras, MIN(valor) AS pior
+FROM resultado
+WHERE parametro = 'OD'
+GROUP BY ponto
+HAVING MIN(valor) < ?
+ORDER BY ponto
+"""
+alguma_sql = mostrar(sql_alguma_abaixo, (OD_MINIMO_MG_L,))
+alguma_python = [(p, len(v), min(v)) for p, v in sorted(od_por_ponto_python.items()) if min(v) < OD_MINIMO_MG_L]
+conferencias["min_ou_media"] = mesmas_linhas(alguma_sql, alguma_python)
+print("SQL e Python concordam:", conferencias["min_ou_media"])
+```
+
+Nestes dados, a média e o mínimo apontam o mesmo ponto (P02, com pior valor 3,9 mg/L). **Isso é coincidência dos dados.** O exercício 2 constrói um caso em que a média passa e o mínimo reprova.
+
+## Juntar tabelas: JOIN {#sec-p107-join}
+
+Um `JOIN` combina cada linha da tabela da esquerda com as linhas da tabela da direita em que a condição do `ON` é verdadeira. A condição quase sempre é "a chave estrangeira é igual à chave primária". Vamos ver os dois tipos que importam.
+
+### INNER JOIN: só quem tem par
+
+O `INNER JOIN` (ou simplesmente `JOIN`) mantém as linhas que têm correspondente dos **dois** lados. Para começar, trazemos a unidade e os limites de cada resultado:
+
+```{python}
+#| label: p107-join-parametro
+_ = mostrar("""
+SELECT r.id, r.ponto, r.parametro, r.valor, p.unidade, p.minimo, p.maximo
+FROM resultado r
+JOIN parametro p ON p.codigo = r.parametro
+ORDER BY r.id
+LIMIT 5
+""")
+```
+
+Os apelidos `r` e `p` (declarados nas convenções) dizem de qual tabela vem cada coluna. A condição `p.codigo = r.parametro` liga a chave primária à chave estrangeira. Como todo resultado tem um parâmetro válido (a chave estrangeira garante), o `INNER JOIN` não perde nenhuma linha: continuam 20.
+
+Agora o limite vem **do banco**, não de uma constante em Python. Queremos, para cada ponto e parâmetro, quantos resultados existem e quantos violam o limite:
+
+```{python}
+#| label: p107-conformidade
+sql_conformidade = """
+SELECT r.ponto,
+       r.parametro,
+       COUNT(r.valor) AS medidos,
+       SUM(CASE WHEN r.valor < p.minimo OR r.valor > p.maximo THEN 1 ELSE 0 END) AS fora
+FROM resultado r
+JOIN parametro p ON p.codigo = r.parametro
+GROUP BY r.ponto, r.parametro
+ORDER BY r.ponto, r.parametro
+"""
+conformidade_sql = mostrar(sql_conformidade)
+
+
+def viola(valor, minimo, maximo):
+    """True se o valor está fora do limite; um limite None não existe, e valor None não viola nada."""
+    if valor is None:
+        return False
+    return (minimo is not None and valor < minimo) or (maximo is not None and valor > maximo)
+
+
+limites = {codigo: (minimo, maximo) for codigo, _unidade, minimo, maximo in PARAMETROS}
+conformidade_python = []
+for (ponto, parametro), valores in sorted(agrupar(RESULTADOS, chave=lambda r: (r[0], r[2]), valor=lambda r: r[3]).items()):
+    minimo, maximo = limites[parametro]
+    conformidade_python.append((ponto, parametro, sum(v is not None for v in valores),
+                                sum(viola(v, minimo, maximo) for v in valores)))
+conferencias["conformidade"] = mesmas_linhas(conformidade_sql, conformidade_python)
+print("SQL e Python concordam:", conferencias["conformidade"])
+```
+
+Três detalhes dessa consulta:
+
+* `GROUP BY r.ponto, r.parametro` agrupa por **duas colunas**: um grupo para cada par que existe nos dados (8 pares, 8 linhas). P03 só tem OD e pH, e P04 nem aparece (não tem resultados; já voltamos a ele).
+* `COUNT(r.valor)` conta os **medidos**; o resultado ausente de P02 em agosto (turbidez) deixa P02/turbidez com 2 medidos em vez de 3.
+* O `CASE` usa a lógica de três valores do P1-06 a nosso favor. Para o OD, o `maximo` é `NULL`: `r.valor > NULL` é desconhecido. Se o valor está abaixo do mínimo, `VERDADEIRO OU DESCONHECIDO` é verdadeiro e conta; se não está, `FALSO OU DESCONHECIDO` é desconhecido, e o `CASE` o manda para o `ELSE 0`. Resultado: **um limite que não existe nunca é violado**, sem uma linha de código a mais. O resultado ausente também cai no `ELSE`. (A função `viola` do Python faz as mesmas exclusões, com `if` explícito, para conferir.)
+
+Em P02 aparecem as quatro violações do P1-06: OD 4,8 e 3,9, pH 5,8 e turbidez 135.
+
+### LEFT JOIN: todos os da esquerda
+
+O `LEFT JOIN` mantém **todas** as linhas da tabela da esquerda; quando não há correspondente, as colunas da direita vêm como `NULL`. Compare os dois tipos juntando `ponto` com `fonte`:
+
+```{python}
+#| label: p107-left-inner
+print("INNER JOIN:")
+inner_pf = mostrar("""
+SELECT po.codigo, f.tipo
+FROM ponto po
+JOIN fonte f ON f.ponto = po.codigo
+ORDER BY po.codigo, f.tipo
+""")
+print()
+print("LEFT JOIN:")
+left_pf = mostrar("""
+SELECT po.codigo, f.tipo
+FROM ponto po
+LEFT JOIN fonte f ON f.ponto = po.codigo
+ORDER BY po.codigo, f.tipo
+""")
+conferencias["left_inner_fontes"] = (len(inner_pf), len(left_pf)) == (4, 6)
+```
+
+O `INNER JOIN` devolve 4 linhas: P01 (sem fontes) e P04 (sem fontes) **desapareceram**. O `LEFT JOIN` devolve 6: P01 e P04 ficam, com o `tipo` `NULL`. Repare também que **P02 e P03 aparecem duas vezes cada**: o ponto da esquerda se repete uma vez para cada fonte. Isso é natural num um-para-muitos, e é a semente da armadilha da @sec-p107-fanout.
+
+O uso mais comum do `LEFT JOIN` é "conte para cada ponto, **inclusive os que não têm nada**". E tem um detalhe traiçoeiro: o que contar.
+
+```{python}
+#| label: p107-left-contagem
+sql_contagem = """
+SELECT po.codigo,
+       COUNT(*)    AS conta_linhas,
+       COUNT(r.id) AS conta_resultados
+FROM ponto po
+LEFT JOIN resultado r ON r.ponto = po.codigo
+GROUP BY po.codigo
+ORDER BY po.codigo
+"""
+contagem_sql = mostrar(sql_contagem)
+n_por_ponto = Counter(r[0] for r in RESULTADOS)
+contagem_python = [(codigo, max(n_por_ponto[codigo], 1), n_por_ponto[codigo]) for codigo, _d in PONTOS]
+conferencias["left_contagem"] = mesmas_linhas(contagem_sql, contagem_python)
+print("SQL e Python concordam:", conferencias["left_contagem"])
+print("com INNER JOIN, o P04 some:", [r[0] for r in banco.execute(
+    "SELECT po.codigo FROM ponto po JOIN resultado r ON r.ponto = po.codigo GROUP BY po.codigo ORDER BY po.codigo")])
+```
+
+Para o P04, `COUNT(*)` devolve **1** (a linha do ponto, com tudo da direita `NULL`) e `COUNT(r.id)` devolve **0** (nenhum resultado). A regra: depois de um `LEFT JOIN`, **conte uma coluna da tabela da direita** (a chave dela, `r.id`), nunca `*`. E com `INNER JOIN` o P04 nem aparece.
+
+### A armadilha do WHERE na tabela da direita
+
+Queremos o número de resultados de **OD** por ponto, incluindo P04. A primeira tentativa, natural, põe o filtro no `WHERE`:
+
+```{python}
+#| label: p107-where-ou-on
+print("filtro no WHERE:")
+com_where = mostrar("""
+SELECT po.codigo, COUNT(r.id) AS resultados_od
+FROM ponto po
+LEFT JOIN resultado r ON r.ponto = po.codigo
+WHERE r.parametro = 'OD'
+GROUP BY po.codigo
+ORDER BY po.codigo
+""")
+print()
+print("filtro no ON:")
+com_on = mostrar("""
+SELECT po.codigo, COUNT(r.id) AS resultados_od
+FROM ponto po
+LEFT JOIN resultado r ON r.ponto = po.codigo AND r.parametro = 'OD'
+GROUP BY po.codigo
+ORDER BY po.codigo
+""")
+od_por_ponto_contado = Counter(r[0] for r in RESULTADOS if r[2] == "OD")
+esperado_on = [(codigo, od_por_ponto_contado[codigo]) for codigo, _d in PONTOS]
+conferencias["where_ou_on"] = com_on == esperado_on and [c for c, _n in com_where] == ["P01", "P02", "P03"]
+print("o ON confere com o esperado, e o WHERE perdeu o P04:", conferencias["where_ou_on"])
+```
+
+Com o filtro no `WHERE`, o P04 **sumiu**: o `LEFT JOIN` virou, sem aviso, um `INNER JOIN`. O motivo está na ordem de leitura. O `JOIN` roda primeiro e produz para P04 uma linha com `r.parametro` igual a `NULL`; depois o `WHERE r.parametro = 'OD'` avalia `NULL = 'OD'`, que é **desconhecido**, e descarta a linha (o `WHERE` só deixa passar o verdadeiro). Com o filtro no `ON`, a condição faz parte de **quais linhas da direita casam**; P04 continua na saída, agora com 0.
+
+**Regra:** num `LEFT JOIN`, a condição sobre a tabela da **direita** vai no `ON`; o `WHERE` fica para as condições sobre a tabela da esquerda. (Há uma exceção clássica, a seguir.)
+
+### Quem não tem par: o anti-join
+
+A pergunta "quais pontos **nunca** tiveram coleta?" se responde com um `LEFT JOIN` e um `WHERE ... IS NULL` sobre a direita. É o uso clássico do `WHERE` sobre a tabela da direita, e ele é correto porque aqui o `NULL` é exatamente o que procuramos:
+
+```{python}
+#| label: p107-anti-join
+sem_coleta_sql = [linha[0] for linha in mostrar("""
+SELECT po.codigo
+FROM ponto po
+LEFT JOIN resultado r ON r.ponto = po.codigo
+WHERE r.id IS NULL
+ORDER BY po.codigo
+""")]
+sem_coleta_python = sorted({codigo for codigo, _d in PONTOS} - {r[0] for r in RESULTADOS})
+conferencias["anti_join"] = sem_coleta_sql == sem_coleta_python == ["P04"]
+print("SQL e Python concordam:", conferencias["anti_join"])
+
+try:
+    n_right = banco.execute("SELECT COUNT(*) FROM resultado r RIGHT JOIN ponto po ON r.ponto = po.codigo").fetchone()[0]
+except sqlite3.Error as erro:
+    n_right = "ERRO: " + str(erro)
+print("RIGHT JOIN (ponto à direita) no SQLite", sqlite3.sqlite_version + ":", n_right)
+```
+
+O resultado é o P04, e o Python confirma pela diferença de conjuntos. (Existem também o `RIGHT JOIN`, que é um `LEFT JOIN` com as tabelas trocadas, e o `FULL JOIN`, que mantém as linhas sem par de **ambos** os lados. A versão do SQLite usada aqui os aceita, e a última linha acima, com 21, é as 20 de `resultado` mais o P04. **Não conferi desde qual versão do SQLite eles existem**; para não depender disso, escreva sempre `LEFT JOIN`, trocando a ordem das tabelas se preciso. Ainda não vimos a outra maneira de fazer o anti-join, `NOT EXISTS`, que vem com as subconsultas, no P1-08.)
+
+## O erro clássico: o JOIN que multiplica linhas {#sec-p107-fanout}
+
+Este é o erro mais perigoso do capítulo, porque **não dá erro nenhum**: o banco devolve números de aparência razoável, só que errados. Queremos, digamos, a média do oxigênio dissolvido de todos os resultados, **e** a fonte de pressão de cada ponto, na mesma tabela. A ideia ingênua é juntar `resultado` e `fonte` pelo ponto.
+
+O problema está na cardinalidade. Para um mesmo ponto, existem **vários** resultados e **várias** fontes. Juntar pela chave do ponto emparelha **cada** resultado com **cada** fonte do ponto. P02 tem 9 resultados e 2 fontes; a junção produz 9 × 2 = 18 linhas só para ele.
+
+Seguindo a regra 2 do método, escrevemos primeiro a conta a partir da definição e só então vemos o que o banco faz. Para cada linha da esquerda, o `JOIN` interno produz uma linha por correspondente na direita; o externo (`LEFT`) produz pelo menos uma:
+
+```{python}
+#| label: p107-fanout-contagem
+def linhas_apos_join(chaves_esquerda, chaves_direita, tipo="interno"):
+    """Quantas linhas um JOIN pela chave produz, calculado da definição.
+    interno: uma linha por correspondente na direita; externo: ao menos uma, mesmo sem correspondente."""
+    na_direita = Counter(chaves_direita)
+    if tipo == "interno":
+        return sum(na_direita[chave] for chave in chaves_esquerda)
+    return sum(max(na_direita[chave], 1) for chave in chaves_esquerda)
+
+
+chaves_resultado = [r[0] for r in RESULTADOS]
+chaves_fonte = [f[0] for f in FONTES]
+previsto = (len(RESULTADOS),
+            linhas_apos_join(chaves_resultado, chaves_fonte, "interno"),
+            linhas_apos_join(chaves_resultado, chaves_fonte, "externo"))
+no_sql = (
+    banco.execute("SELECT COUNT(*) FROM resultado").fetchone()[0],
+    banco.execute("SELECT COUNT(*) FROM resultado r JOIN fonte f ON f.ponto = r.ponto").fetchone()[0],
+    banco.execute("SELECT COUNT(*) FROM resultado r LEFT JOIN fonte f ON f.ponto = r.ponto").fetchone()[0],
+)
+print("linhas (sem JOIN, JOIN interno, LEFT JOIN)")
+print("  previsto pela definição:", previsto)
+print("  contado no SQLite:      ", no_sql)
+conferencias["fanout_contagem"] = previsto == no_sql == (20, 22, 31)
+print("a previsão confere:", conferencias["fanout_contagem"])
+```
+
+De 20 linhas, a tabela juntada ficou com **22** (JOIN interno) ou **31** (`LEFT JOIN`). Os 22: P02 contribui 9 × 2 = 18, P03 contribui 2 × 2 = 4, e P01, sem fontes, **desaparece** (zero correspondentes). Os 31: P01 entra com 9 × 1, P02 com 18, P03 com 4. Nenhum dos dois é "a tabela de resultados com a fonte ao lado".
+
+E o que isso faz com as contas? A média do OD, calculada sobre as três versões da tabela (a original e as duas juntadas):
+
+```{python}
+#| label: p107-fanout-media
+sql_media_od = "SELECT AVG(r.valor) FROM resultado r {juncao} WHERE r.parametro = 'OD'"  # {juncao}: nosso texto, não de usuário
+media_correta = banco.execute(sql_media_od.format(juncao="")).fetchone()[0]
+media_interna = banco.execute(sql_media_od.format(juncao="JOIN fonte f ON f.ponto = r.ponto")).fetchone()[0]
+media_externa = banco.execute(sql_media_od.format(juncao="LEFT JOIN fonte f ON f.ponto = r.ponto")).fetchone()[0]
+print(f"média de OD, sem JOIN:        {media_correta:.4f}")
+print(f"média de OD, depois do JOIN:  {media_interna:.4f}")
+print(f"média de OD, depois do LEFT:  {media_externa:.4f}")
+
+# a conferência repete, em Python, cada valor de OD tantas vezes quantas linhas a junção produziu para ele
+fontes_por_ponto = Counter(chaves_fonte)
+od_pontos_valores = [(p, v) for p, _d, par, v in RESULTADOS if par == "OD"]
+valores_ok = [v for _p, v in od_pontos_valores]
+valores_internos = [v for p, v in od_pontos_valores for _ in range(fontes_por_ponto[p])]
+valores_externos = [v for p, v in od_pontos_valores for _ in range(max(fontes_por_ponto[p], 1))]
+conferencias["fanout_media"] = (math.isclose(media_correta, statistics.mean(valores_ok), abs_tol=TOL_EXATA)
+                                and math.isclose(media_interna, statistics.mean(valores_internos), abs_tol=TOL_EXATA)
+                                and math.isclose(media_externa, statistics.mean(valores_externos), abs_tol=TOL_EXATA))
+print("as três médias conferem com a repetição em Python:", conferencias["fanout_media"])
+```
+
+A média correta é **6,2429** mg/L. Depois do `JOIN` interno cai para **5,3250**; depois do `LEFT JOIN`, para **5,9091**. Nenhum erro, nenhum aviso; só um número que parece plausível e está errado. A causa é a de sempre: cada valor de OD passou a contar **tantas vezes quantas fontes** o seu ponto tem, e os pontos passaram a pesar de modo desigual. No `JOIN` interno, os valores de P01 (altos, 7,1 a 7,8) **somem** e os de P02 e P03 pesam em dobro; no `LEFT JOIN`, P01 pesa uma vez e os outros dois, duas.
+
+O mais traiçoeiro é que algumas contas **sobrevivem**. Veja, por ponto, o que a junção com `LEFT JOIN` faz com a contagem, a soma e a média:
+
+```{python}
+#| label: p107-fanout-por-ponto
+fanout_por_ponto = mostrar("""
+SELECT r.ponto,
+       COUNT(*)                   AS linhas,
+       COUNT(DISTINCT r.id)       AS resultados,
+       ROUND(SUM(r.valor), 1)     AS soma,
+       ROUND(AVG(r.valor), 2)     AS media
+FROM resultado r
+LEFT JOIN fonte f ON f.ponto = r.ponto
+WHERE r.parametro = 'OD'
+GROUP BY r.ponto
+ORDER BY r.ponto
+""")
+soma_certa = {p: round(sum(v), 1) for p, v in od_por_ponto_python.items()}
+esperado_fanout = [(p, len(v) * max(fontes_por_ponto[p], 1), len(v), round(sum(v) * max(fontes_por_ponto[p], 1), 1),
+                    statistics.mean(v)) for p, v in sorted(od_por_ponto_python.items())]
+conferencias["fanout_por_ponto"] = mesmas_linhas(fanout_por_ponto, esperado_fanout, tol=TOL_DUAS_CASAS)
+print("somas corretas, sem a junção:", soma_certa)
+print("SQL e Python concordam:", conferencias["fanout_por_ponto"])
+```
+
+A **média por ponto** (4,93 em P02, por exemplo) não mudou: repetir todos os valores de um ponto o mesmo número de vezes não altera a média **dele**. Já a **contagem** (`linhas` de P02: 6, quando os resultados são 3) e a **soma** (29,6 em P02, quando a soma certa é 14,8) dobraram. Se o seu relatório mostra a média por ponto, parece tudo certo; se somar ou contar, ou se calcular uma média de vários pontos, está errado. **A pior armadilha é a que só estraga algumas das contas.**
+
+Para ver o estrago de uma vez, a figura abaixo desenha os dois números do problema:
+
+```{python}
+#| label: fig-p107-fanout
+#| fig-cap: "O JOIN que multiplica linhas (dados sintéticos). (a) Número de linhas: 20 resultados viram 22 depois de um JOIN interno com `fonte` e 31 depois de um LEFT JOIN. (b) A média de oxigênio dissolvido, que é 6,24 mg/L, cai para 5,33 e para 5,91. A linha tracejada marca o valor correto em cada painel."
+#| fig-alt: "Dois gráficos de barras lado a lado. À esquerda, o número de linhas: 20 sem junção, 22 com junção interna e 31 com LEFT JOIN, com uma linha tracejada em 20. À direita, a média de oxigênio dissolvido: 6,24 sem junção, 5,33 com junção interna e 5,91 com LEFT JOIN, com uma linha tracejada em 6,24."
+rotulos = ["sem JOIN", "JOIN interno", "LEFT JOIN"]
+COR_BARRA = "#1b6ca8"
+COR_REFERENCIA = "#555555"
+
+
+def com_virgula(numero, casas):
+    return f"{numero:.{casas}f}".replace(".", ",")
+
+
+fig, (ax_linhas, ax_media) = plt.subplots(1, 2, figsize=(8.6, 3.9))
+paineis = (
+    (ax_linhas, list(no_sql), no_sql[0], "(a) linhas depois da junção", "número de linhas", 36, 0),
+    (ax_media, [media_correta, media_interna, media_externa], media_correta, "(b) média de OD (mg/L)", "oxigênio dissolvido (mg/L)", 8.4, 2),
+)
+for ax, valores, referencia, titulo, rotulo_y, limite_y, casas in paineis:
+    barras = ax.bar(rotulos, valores, color=COR_BARRA, width=0.55)
+    ax.axhline(referencia, color=COR_REFERENCIA, linestyle="--", linewidth=1.2, label="valor correto")
+    for barra, valor in zip(barras, valores):
+        ax.text(barra.get_x() + barra.get_width() / 2, valor / 2, com_virgula(valor, casas),
+                ha="center", va="center", fontsize=11, color="white", fontweight="bold")
+    ax.set_title(titulo, fontsize=10.5, loc="left")
+    ax.set_ylabel(rotulo_y)
+    ax.set_ylim(0, limite_y)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.legend(loc="upper left", frameon=False, fontsize=9)
+fig.tight_layout()
+plt.show()
+
+print("valores desenhados, painel (a):", no_sql)
+print("valores desenhados, painel (b):", [round(m, 2) for m in (media_correta, media_interna, media_externa)])
+```
+
+A @fig-p107-fanout resume o estrago: a linha tracejada é o valor certo, e cada barra mostra o que o banco devolveu em uma das versões da tabela. No painel (a), o `LEFT JOIN` passa de 20 para 31 linhas; no (b), as duas médias ficam abaixo da correta. (Cada painel tem a sua escala; por isso são dois gráficos, e não um com dois eixos verticais.)
+
+### Os remendos que não resolvem
+
+Dois remendos são tentadores. O primeiro é o `COUNT(DISTINCT r.id)`, que **conserta a contagem** (volta a 20) mas não a soma nem a média. O segundo é o `AVG(DISTINCT valor)`, que parece fazer o mesmo e é pior: o `DISTINCT` elimina **valores iguais**, e não linhas repetidas.
+
+```{python}
+#| label: p107-fanout-remendos
+n_distintos = banco.execute("SELECT COUNT(DISTINCT r.id) FROM resultado r LEFT JOIN fonte f ON f.ponto = r.ponto").fetchone()[0]
+print(f"COUNT(DISTINCT r.id) depois do LEFT JOIN: {n_distintos} (a contagem certa é {len(RESULTADOS)})")
+
+# três resultados: duas medições iguais (7,0) e uma diferente (5,0)
+media_distinta, media_certa_pequena = banco.execute(
+    "SELECT AVG(DISTINCT v), AVG(v) FROM (SELECT 7.0 AS v UNION ALL SELECT 7.0 UNION ALL SELECT 5.0)").fetchone()
+print(f"AVG(DISTINCT v) = {media_distinta:.4f}   AVG(v) = {media_certa_pequena:.4f}   (a média certa de 7, 7 e 5 é {statistics.mean([7, 7, 5]):.4f})")
+conferencias["fanout_remendos"] = (n_distintos == len(RESULTADOS) and math.isclose(media_distinta, 6.0, abs_tol=TOL_EXATA)
+                                   and math.isclose(media_certa_pequena, statistics.mean([7, 7, 5]), abs_tol=TOL_EXATA))
+```
+
+Com o `AVG(DISTINCT v)`, o 7 repetido foi contado **uma** vez e a média foi para 6,0, quando a média dos três resultados é 6,3333. (O PostgreSQL 16.15 devolve o mesmo 6,0, conforme o registro da @sec-p107-dialetos.) Em nenhum dos dois casos o `DISTINCT` sabe qual linha é "repetida por causa da junção".
+
+### A correção: agregar antes de juntar
+
+A pergunta certa antes de **qualquer** `JOIN` é: *quantas linhas de cada lado têm a mesma chave?* Se de um lado é uma só, a junção não multiplica (é o caso `resultado` → `parametro`: cada resultado tem um parâmetro). Se dos **dois** lados são várias, ela multiplica. A cura é reduzir um dos lados a **uma linha por chave** antes de juntar:
+
+```{python}
+#| label: p107-fanout-correcao
+sql_corrigido = """
+SELECT r.ponto,
+       COUNT(*)                   AS resultados,
+       ROUND(AVG(r.valor), 2)     AS media,
+       COALESCE(fo.n_fontes, 0)   AS n_fontes
+FROM resultado r
+LEFT JOIN (SELECT ponto, COUNT(*) AS n_fontes
+           FROM fonte
+           GROUP BY ponto) AS fo ON fo.ponto = r.ponto
+WHERE r.parametro = 'OD'
+GROUP BY r.ponto, fo.n_fontes
+ORDER BY r.ponto
+"""
+corrigido_sql = mostrar(sql_corrigido)
+corrigido_python = [(p, len(v), statistics.mean(v), fontes_por_ponto[p]) for p, v in sorted(od_por_ponto_python.items())]
+media_global_corrigida = banco.execute("""
+SELECT AVG(r.valor)
+FROM resultado r
+LEFT JOIN (SELECT ponto, COUNT(*) AS n_fontes FROM fonte GROUP BY ponto) AS fo ON fo.ponto = r.ponto
+WHERE r.parametro = 'OD'
+""").fetchone()[0]
+linhas_depois = banco.execute("""
+SELECT COUNT(*)
+FROM resultado r
+LEFT JOIN (SELECT ponto, COUNT(*) AS n_fontes FROM fonte GROUP BY ponto) AS fo ON fo.ponto = r.ponto
+""").fetchone()[0]
+conferencias["fanout_correcao"] = (mesmas_linhas(corrigido_sql, corrigido_python, tol=TOL_DUAS_CASAS)
+                                   and linhas_depois == len(RESULTADOS)
+                                   and math.isclose(media_global_corrigida, statistics.mean(valores_ok), abs_tol=TOL_EXATA))
+print(f"linhas depois da junção corrigida: {linhas_depois} | média global de OD: {media_global_corrigida:.4f}")
+print("SQL e Python concordam, e a média voltou ao valor certo:", conferencias["fanout_correcao"])
+```
+
+O trecho entre parênteses depois de `LEFT JOIN` é uma **tabela derivada**: uma consulta que o banco calcula primeiro e trata como uma tabela, com apelido (`fo`). Aqui ela devolve **uma linha por ponto** com o número de fontes (P01 não tem linha; o `COALESCE(..., 0)` transforma esse `NULL` em zero, que **aqui** é o certo: ponto sem fonte conhecida tem zero fontes). Com um lado reduzido a uma linha por chave, a junção volta a ser um-para-um do ponto de vista dos resultados: as **20 linhas** continuam 20 e a média global volta aos **6,2429**. As subconsultas, em geral, são o assunto do P1-08.
+
+**Duas defesas permanentes:** (1) antes de confiar numa junção, compare `COUNT(*)` antes e depois, ou calcule o resultado esperado como fizemos com `linhas_apos_join`; (2) desenhe a cardinalidade dos dois lados. O pandas tem a defesa embutida, a seguir.
+
+## Conferir com o pandas {#sec-p107-pandas}
+
+O pandas faz, em memória, o que o SQL faz no banco: `groupby` é o `GROUP BY`, `merge` é o `JOIN`. Rodar a mesma pergunta nos dois e comparar é a forma mais rápida de achar um erro. (Esta seção usa o pandas como o P1-04 e o P1-05 o apresentam; aqui só o que precisamos.) O `pandas.read_sql_query` roda uma consulta e devolve um `DataFrame`:
+
+```{python}
+#| label: p107-pandas-leitura
+import pandas as pd
+
+df = pd.read_sql_query("SELECT ponto, data, parametro, valor FROM resultado", banco)
+fon = pd.read_sql_query("SELECT ponto, tipo FROM fonte", banco)
+print("resultado:", df.shape, "| fonte:", fon.shape)
+print("o NULL do SQL virou NaN no pandas; ausentes em 'valor':", int(df["valor"].isna().sum()))
+```
+
+A correspondência entre os dois mundos:
+
+| No SQL | No pandas | Cuidado |
+|:--|:--|:--|
+| `COUNT(*)` | `.size()` | conta as linhas, incluindo as ausentes |
+| `COUNT(coluna)` | `.count()` | conta só as que **têm** valor |
+| `AVG(coluna)` | `.mean()` | os dois ignoram o ausente (no pandas, `skipna=True` é o padrão) |
+| `GROUP BY a` | `.groupby("a")` | o pandas **descarta** o grupo `NaN`, a menos que se peça o contrário |
+| `WHERE` | máscara booleana: `df[df["parametro"] == "OD"]` | |
+| `HAVING` | filtrar o resultado já agregado | |
+| `JOIN` / `LEFT JOIN` | `.merge(..., how="inner")` / `how="left"` | multiplica linhas como o SQL; mas liga chave ausente (`NaN`) com `NaN`, o que o SQL não faz (veja adiante) |
+
+Conferindo as médias de OD por ponto (a consulta da @sec-p107-grupos) e as contagens:
+
+```{python}
+#| label: p107-pandas-groupby
+od = df[df["parametro"] == "OD"]
+por_ponto_pandas = od.groupby("ponto")["valor"].agg(linhas="size", medidos="count", media="mean")
+print(por_ponto_pandas.round(2))
+
+linhas_pandas = [(t.Index, t.linhas, t.media) for t in por_ponto_pandas.itertuples()]
+conferencias["pandas_groupby"] = mesmas_linhas(od_por_ponto_sql, linhas_pandas, tol=TOL_DUAS_CASAS)
+print("pandas e SQL concordam:", conferencias["pandas_groupby"])
+
+# o NULL como grupo: o SQL mostra 6 grupos de turbidez; o pandas, por padrão, 5
+turbidez = df[df["parametro"] == "turbidez"]
+grupos_padrao = turbidez.groupby("valor").size()
+grupos_com_nan = turbidez.groupby("valor", dropna=False).size()
+print("grupos de turbidez no SQL:", len(grupos_turbidez), "| pandas (padrão):", len(grupos_padrao), "| pandas (dropna=False):", len(grupos_com_nan))
+conferencias["pandas_dropna"] = (len(grupos_turbidez), len(grupos_padrao), len(grupos_com_nan)) == (6, 5, 6)
+```
+
+As contas por ponto batem. Mas veja o grupo do ausente: o SQL tem 6 grupos de turbidez, o `groupby` do pandas tem **5**, porque descarta por padrão a chave `NaN`. Para o pandas se comportar como o SQL, `dropna=False`. É a mesma pergunta com respostas diferentes, e só aparece porque comparamos.
+
+Agora o `merge`, que reproduz a multiplicação, e o seu mecanismo de defesa, o argumento `validate`:
+
+```{python}
+#| label: p107-pandas-merge
+m_interno = df.merge(fon, on="ponto", how="inner")
+m_externo = df.merge(fon, on="ponto", how="left")
+print("linhas: original", len(df), "| merge interno", len(m_interno), "| merge left", len(m_externo))
+conferencias["pandas_merge"] = (len(m_interno), len(m_externo)) == (22, 31)
+
+# validate: o pandas confere a cardinalidade que VOCÊ declarou e recusa se os dados não a respeitam
+try:
+    df.merge(fon, on="ponto", how="left", validate="many_to_one")  # "cada resultado tem UMA fonte": falso
+    erro_validate = None
+except pd.errors.MergeError as erro:
+    erro_validate = str(erro).splitlines()[0]
+print("validate='many_to_one':", erro_validate)
+conferencias["pandas_validate"] = erro_validate is not None
+```
+
+O `merge` do pandas multiplica as linhas como o SQL: 22 e 31. E o argumento `validate="many_to_one"` declara a cardinalidade esperada ("muitos resultados para uma fonte"); como a tabela `fon` tem duas fontes por ponto, o pandas **recusa** com um `MergeError`. O SQL nunca faz essa pergunta; o pandas faz, se você pedir. Pegue o hábito de usar `validate` em todo `merge` cuja cardinalidade você acha que conhece.
+
+Mas atenção aos **limites** do `validate` e ao tratamento do ausente. O `validate` só confere se as chaves do lado "um" são **únicas**; ele **não** acusa uma chave órfã (um ponto do lado "muitos" que não existe no lado "um"), que é justamente o que a chave estrangeira do banco impede. E o pandas liga chave ausente (`NaN`) com `NaN`, enquanto no SQL `NULL = NULL` não é verdadeiro e a linha não casa:
+
+```{python}
+#| label: p107-pandas-limites
+muitos = pd.DataFrame({"ponto": ["P01", "PX"], "valor": [7.8, 6.1]})  # PX não existe no lado "um"
+um = pd.DataFrame({"ponto": ["P01"], "descricao": ["montante do lançamento"]})
+juntado = muitos.merge(um, on="ponto", how="left", validate="many_to_one")  # não dá erro
+n_orfaos = int(juntado["descricao"].isna().sum())
+print("validate não reclamou; linhas de chave órfã que passaram:", n_orfaos)
+
+esquerda = pd.DataFrame({"k": [None, "a"]})
+direita = pd.DataFrame({"k": [None, "a"]})
+n_linhas_pandas = len(esquerda.merge(direita, on="k"))
+n_linhas_sql = banco.execute("SELECT COUNT(*) FROM (SELECT NULL AS k UNION ALL SELECT 'a') AS e "
+                             "JOIN (SELECT NULL AS k UNION ALL SELECT 'a') AS d ON e.k = d.k").fetchone()[0]
+print(f"junção por chave com ausente: pandas {n_linhas_pandas} linhas, SQL {n_linhas_sql} linha")
+conferencias["pandas_limites"] = (n_orfaos == 1 and (n_linhas_pandas, n_linhas_sql) == (2, 1))
+```
+
+Na prática: antes de juntar, confira as chaves (`set(muitos["ponto"]) - set(um["ponto"])` lista os órfãos) e trate o ausente de propósito.
+
+Por fim, o caminho inverso, `DataFrame.to_sql`, que grava um `DataFrame` numa tabela. Aqui mora um perigo que o `read_sql_query` não tem: com `if_exists="replace"`, o pandas **apaga a tabela e a recria do jeito que ele acha**, sem as regras. Numa **cópia** do banco:
+
+```{python}
+#| label: p107-pandas-to-sql
+copia = sqlite3.connect(":memory:")
+banco.backup(copia)
+tabela_inteira = pd.read_sql_query("SELECT * FROM resultado", copia)
+
+# 1) if_exists="replace": a tabela é recriada pelo pandas
+tabela_inteira.to_sql("resultado", copia, if_exists="replace", index=False)
+sql_recriada = copia.execute("SELECT sql FROM sqlite_master WHERE name = 'resultado'").fetchone()[0]
+print(sql_recriada)
+perdeu_regras = not any(palavra in sql_recriada.upper() for palavra in ("PRIMARY KEY", "REFERENCES", "CHECK", "NOT NULL"))
+print("o pandas recriou a tabela sem chave primária, sem chave estrangeira, sem CHECK e sem NOT NULL:", perdeu_regras)
+
+# 2) if_exists="append": a tabela original, com as regras, é mantida
+copia2 = sqlite3.connect(":memory:")
+banco.backup(copia2)
+copia2.execute("PRAGMA foreign_keys = ON")
+copia2.execute("DELETE FROM resultado")
+copia2.commit()
+df.to_sql("resultado", copia2, if_exists="append", index=False)
+linhas_guardadas = copia2.execute("SELECT COUNT(*) FROM resultado").fetchone()[0]
+ruim = pd.DataFrame({"ponto": ["P01"], "data": ["2024-02-30"], "parametro": ["OD"], "valor": [7.0]})
+try:
+    ruim.to_sql("resultado", copia2, if_exists="append", index=False)
+    recusou_dado_ruim = False
+except (pd.errors.DatabaseError, sqlite3.Error):  # conforme a versão do pandas, um ou outro
+    recusou_dado_ruim = True
+linhas_depois_do_ruim = copia2.execute("SELECT COUNT(*) FROM resultado").fetchone()[0]
+print("com 'append': gravou", linhas_guardadas, "linhas; recusou a data 2024-02-30:", recusou_dado_ruim, "| linhas depois:", linhas_depois_do_ruim)
+conferencias["pandas_to_sql"] = (perdeu_regras and linhas_guardadas == 20 and recusou_dado_ruim and linhas_depois_do_ruim == 20)
+copia.close()
+copia2.close()
+```
+
+Com `replace`, a tabela voltou sem a chave primária, sem `REFERENCES`, sem o `CHECK` e sem os `NOT NULL`: todas as proteções da @sec-p107-tabelas se foram, e o banco passa a aceitar a data `2024-02-30` e o ponto `PX`. Com `append`, as regras da tabela original continuam valendo, e o dado ruim é **recusado** (no pandas 3.0.5, o único que testei, o erro chega como `DatabaseError`; a gravação inteira é desfeita, e continuam 20 linhas). A regra: **crie a tabela com `CREATE TABLE` e use o `to_sql` só com `append`.**
+
+## Prática: o relatório de conformidade por ponto {#sec-p107-pratica}
+
+Juntamos tudo numa só pergunta, a que um relatório de monitoramento faria: *para cada ponto cadastrado, quantas campanhas, quantos resultados medidos, quantos fora do limite e que percentual dos medidos está conforme?* Ela usa dois `LEFT JOIN` (para não perder o P04), `COUNT(DISTINCT ...)`, o `CASE` com limites da tabela, uma tabela derivada e o `NULLIF`:
+
+```{python}
+#| label: p107-relatorio
+sql_relatorio = """
+SELECT ponto, campanhas, medidos, fora,
+       ROUND(100.0 * (medidos - fora) / NULLIF(medidos, 0), 1) AS pct_conforme
+FROM (
+    SELECT po.codigo                  AS ponto,
+           COUNT(DISTINCT r.data)     AS campanhas,
+           COUNT(r.valor)             AS medidos,
+           SUM(CASE WHEN r.valor < p.minimo OR r.valor > p.maximo THEN 1 ELSE 0 END) AS fora
+    FROM ponto po
+    LEFT JOIN resultado r ON r.ponto = po.codigo
+    LEFT JOIN parametro p ON p.codigo = r.parametro
+    GROUP BY po.codigo
+) AS por_ponto
+ORDER BY ponto
+"""
+relatorio_sql = mostrar(sql_relatorio)
+
+relatorio_python = []
+for codigo, _descricao in PONTOS:
+    do_ponto = [(d, par, v) for p, d, par, v in RESULTADOS if p == codigo]
+    medidos = sum(v is not None for _d, _par, v in do_ponto)
+    fora = sum(viola(v, *limites[par]) for _d, par, v in do_ponto)
+    percentual = 100.0 * (medidos - fora) / medidos if medidos else None
+    relatorio_python.append((codigo, len({d for d, _par, _v in do_ponto}), medidos, fora, percentual))
+conferencias["relatorio"] = mesmas_linhas(relatorio_sql, relatorio_python)
+print("SQL e Python concordam:", conferencias["relatorio"])
+```
+
+Leitura: P01 e P03 estão 100% conformes (9 e 2 medidos, nenhum fora); **P02** tem 8 medidos, **4 fora** e 50% de conformidade (a coleta de turbidez de agosto, perdida, não entra na conta: `medidos` é 8, não 9); e o **P04**, sem coleta, tem 0 campanhas, 0 medidos, 0 fora, e o percentual é **`NULL`**, e não 100%.
+
+Dois cuidados na consulta. O `NULLIF(medidos, 0)` devolve `NULL` quando `medidos` é zero, e assim evita a **divisão por zero**: o SQLite já devolve `NULL` para `x / 0`, mas o PostgreSQL dá erro (@sec-p107-dialetos), e o `NULLIF` funciona nos dois. E o `NULL` do P04 é a resposta honesta: **sem dados não é "100% conforme"**, é "não sei". Mostrar `100` ali seria o mesmo erro de tratar ausente como zero, só que escondido num percentual.
+
+## Dialetos: o que muda de um banco para outro {#sec-p107-dialetos}
+
+Como no P1-06, cada "sonda" abaixo é executada **ao vivo** no SQLite do seu computador, e o PostgreSQL é um **registro** de uma execução real que fiz em 08/10/2026 (versão 16.15, Linux, servidor local) e que o capítulo **não reexecuta**. No PostgreSQL, usei tabelas equivalentes às nossas, com `data date`, `valor double precision`, números automáticos (`GENERATED ALWAYS AS IDENTITY`) e os mesmos dados; as consultas foram as mesmas, com as exceções que o texto mostra.
+
+```{python}
+#| label: p107-dialetos
+def resultado_no_sqlite(sql):
+    """Roda uma consulta e devolve a primeira linha como texto, com ' | ' entre as colunas (ou a mensagem de erro)."""
+    try:
+        linhas = banco.execute(sql).fetchall()
+    except sqlite3.Error as erro:
+        return "ERRO: " + str(erro)
+    if not linhas:
+        return "(nenhuma linha)"
+    return " | ".join("NULL" if v is None else str(v) for v in linhas[0])
+
+
+# (chave, o que se testa, consulta no SQLite; a mesma consulta rodou no PostgreSQL)
+SONDAS = [
+    ("coluna_solta", "linhas devolvidas por SELECT ponto, valor ... GROUP BY ponto",
+     "SELECT COUNT(*) FROM (SELECT ponto, valor FROM resultado GROUP BY ponto) AS t"),
+    ("having_coluna_solta", "linhas devolvidas por GROUP BY ponto HAVING parametro = 'OD' (coluna solta no HAVING)",
+     "SELECT COUNT(*) FROM (SELECT ponto FROM resultado GROUP BY ponto HAVING parametro = 'OD') AS t"),
+    ("apelido_having", "apelido do SELECT usado no HAVING (primeira linha)",
+     "SELECT ponto, AVG(valor) AS media FROM resultado GROUP BY ponto HAVING media < 10 ORDER BY ponto"),
+    ("round_media", "ROUND(AVG(valor), 1) sobre ponto flutuante",
+     "SELECT ROUND(AVG(valor), 1) FROM resultado WHERE parametro = 'OD'"),
+    ("avg_inteiros", "AVG de 1 e 2 (dois inteiros)",
+     "SELECT AVG(v) FROM (SELECT 1 AS v UNION ALL SELECT 2) AS t"),
+    ("agregado_where", "AVG(valor) dentro do WHERE",
+     "SELECT ponto FROM resultado WHERE AVG(valor) < 5 GROUP BY ponto"),
+    ("conjunto_vazio", "COUNT, SUM e AVG de um conjunto vazio",
+     "SELECT COUNT(valor), SUM(valor), AVG(valor) FROM resultado WHERE parametro = 'nada'"),
+    ("group_concat", "group_concat(codigo, ', ')",
+     "SELECT group_concat(codigo, ', ') FROM ponto"),
+    ("string_agg", "string_agg(codigo, ', ' ORDER BY codigo)",
+     "SELECT string_agg(codigo, ', ' ORDER BY codigo) FROM ponto"),
+    ("ordem_null", "primeiro valor de turbidez, em ordem crescente (há um NULL)",
+     "SELECT valor FROM resultado WHERE parametro = 'turbidez' GROUP BY valor ORDER BY valor LIMIT 1"),
+    ("div_zero_pct", "100.0 * 4 / 0",
+     "SELECT 100.0 * 4 / 0"),
+    ("nullif_pct", "100.0 * 4 / NULLIF(0, 0)",
+     "SELECT 100.0 * 4 / NULLIF(0, 0)"),
+    ("avg_distinct", "AVG(DISTINCT v) de 7, 7 e 5",
+     "SELECT AVG(DISTINCT v) FROM (SELECT 7.0 AS v UNION ALL SELECT 7.0 UNION ALL SELECT 5.0) AS t"),
+]
+dialeto_sqlite = {chave: resultado_no_sqlite(sql) for chave, _o_que, sql in SONDAS}
+
+# duas sondas que já rodaram nas seções anteriores (conexões novas, sem PRAGMA)
+dialeto_sqlite["fk_padrao"] = orfao_sem_fk
+dialeto_sqlite["pk_texto_nulo"] = pk_nulo["sem NOT NULL"]
+SONDAS += [
+    ("fk_padrao", "gravar resultado de ponto inexistente, numa conexão nova", None),
+    ("pk_texto_nulo", "gravar NULL numa chave primária TEXT sem NOT NULL", None),
+]
+
+# REGISTRO (não é executado aqui): PostgreSQL 16.15, Ubuntu Linux, 08/10/2026
+POSTGRESQL_16_15 = {
+    "coluna_solta": 'ERRO: column "resultado.valor" must appear in the GROUP BY clause or be used in an aggregate function',
+    "having_coluna_solta": 'ERRO: column "resultado.parametro" must appear in the GROUP BY clause or be used in an aggregate function',
+    "apelido_having": 'ERRO: column "media" does not exist',
+    "round_media": "ERRO: function round(double precision, integer) does not exist",
+    "avg_inteiros": "1.5000000000000000",
+    "agregado_where": "ERRO: aggregate functions are not allowed in WHERE",
+    "conjunto_vazio": "0 | NULL | NULL",
+    "group_concat": "ERRO: function group_concat(text, unknown) does not exist",
+    "string_agg": "P01, P02, P03, P04",
+    "ordem_null": "9",
+    "div_zero_pct": "ERRO: division by zero",
+    "nullif_pct": "NULL",
+    "avg_distinct": "6.0000000000000000",
+    "fk_padrao": 'ERRO: insert or update on table "resultado" violates foreign key constraint "resultado_ponto_fkey"',
+    "pk_texto_nulo": 'ERRO: null value in column "c" of relation "tpk" violates not-null constraint',
+}
+
+for chave, o_que, _sql in SONDAS:
+    print(o_que)
+    print(f"   SQLite {sqlite3.sqlite_version} (ao vivo):   ", dialeto_sqlite[chave])
+    print("   PostgreSQL 16.15 (registro):", POSTGRESQL_16_15[chave])
+```
+
+(O rótulo do SQLite mostra a versão **do seu computador**; o do PostgreSQL é sempre a do registro.)
+
+Além das sondas, rodei no PostgreSQL 16.15 as **27 consultas do corpo do capítulo** (as de agregação, `GROUP BY`, `HAVING`, `JOIN`, `LEFT JOIN`, a multiplicação de linhas, a correção, o relatório e a do desafio; as dos exercícios 1 a 4 e 6 e a variante com `ELSE 0` ficaram de fora), e comparei o resultado de cada uma com o do SQLite: **os números foram os mesmos**. Foi uma conferência feita **uma vez**, com um script auxiliar que não está no repositório; o roteiro SQL que o PostgreSQL executou está em `tools/registro_postgresql_p1-07.sql`, e você pode rodá-lo com `psql -d <um banco de teste> -X -f tools/registro_postgresql_p1-07.sql`. Ele cria só tabelas temporárias. Duas ressalvas: as consultas tiveram pequenas adaptações (o `ROUND` sobre um `CAST(... AS numeric)`, e os limites escritos no texto da consulta, em vez de por parâmetro); e a ordem de linhas que depende de `NULL` ou de ordenação de texto (como a do `GROUP BY valor`) pode sair diferente, e foi comparada sem a ordem.
+
+Como ler a lista:
+
+* **O SQLite aceita e o PostgreSQL recusa** (o PostgreSQL é o estrito): a coluna solta no `GROUP BY` ou no `HAVING` (o SQLite devolve 3 linhas, com o `valor` ou o `parametro` de uma linha à escolha dele); o apelido do `SELECT` usado no `HAVING`; o `ROUND` com duas entradas sobre ponto flutuante (no PostgreSQL só existe para `numeric`, e a saída é converter antes: o `CAST(AVG(valor) AS numeric)` do nosso registro); a divisão por zero (o SQLite devolve `NULL`; o PostgreSQL dá erro); gravar um resultado de ponto inexistente (o SQLite, em conexão nova, deixa passar; o PostgreSQL confere a chave estrangeira sempre); e gravar `NULL` numa chave primária de texto sem `NOT NULL`.
+* **Nome de função que existe só de um lado:** `group_concat` é do SQLite, e `string_agg` é do PostgreSQL. A documentação do SQLite descreve `string_agg(X, Y)` como "an alias for group_concat(X,Y)", compatível com o PostgreSQL, e a versão do SQLite usada aqui o aceitou, inclusive com o `ORDER BY` dentro do agregado; **não conferi desde qual versão do SQLite isso vale**. A ordem dos elementos só é garantida com o `ORDER BY` dentro da função.
+* **Os dois respondem, mas diferente:** com os `NULL`, a ordem crescente põe o `NULL` no começo no SQLite e no fim no PostgreSQL (aqui, o primeiro valor foi `NULL` num e `9` no outro: a mesma diferença do P1-06, agora depois de um `GROUP BY`). E a média de dois inteiros é 1,5 nos dois, mas o PostgreSQL devolve um `numeric` exato, `1.5000000000000000`: o valor é o mesmo, **o tipo muda**.
+* **Os dois concordam:** o agregado dentro do `WHERE` é erro nos dois (mensagens diferentes); o conjunto vazio dá `0 | NULL | NULL` nos dois; o `NULLIF(x, 0)` devolve `NULL` nos dois; e o `AVG(DISTINCT ...)` dá 6,0 nos dois, o mesmo valor errado da @sec-p107-fanout. Aquele remendo não é problema do SQLite: é do `DISTINCT`.
+
+**A regra prática**, a mesma do P1-06 com mais quatro itens: escreva o SQL mais perto do padrão que puder. **Todas** as colunas do `SELECT` no `GROUP BY` ou dentro de um agregado; o **agregado** (e não o apelido) no `HAVING`; o `NULLIF` em toda divisão cujo denominador pode ser zero; e `PRAGMA foreign_keys = ON` no SQLite, que faz a chave estrangeira se comportar como no PostgreSQL. Onde os dialetos divergem de verdade (a concatenação de texto, a formatação de datas), isole a parte específica numa função ou numa consulta com nome.
+
+## Erros clássicos {#sec-p107-erros}
+
+1. **`AVG` com o ausente tratado como zero** (`COALESCE(valor, 0)`, ou `SUM(valor) / COUNT(*)`). Subestima a variável, sem aviso. A pergunta: quantos valores entram na média?
+2. **`COUNT(*)` depois de um `LEFT JOIN`.** Conta a linha do ponto sem correspondente como 1. Conte uma coluna da tabela da direita (`COUNT(r.id)`).
+3. **Condição sobre a tabela da direita no `WHERE` de um `LEFT JOIN`.** Desfaz o `LEFT JOIN` em silêncio (o `NULL = 'OD'` é desconhecido). Ponha a condição no `ON`.
+4. **`JOIN` que multiplica linhas.** Duas tabelas "filhas" juntas pela chave do "pai": a soma, a contagem e a média entre pontos saem erradas, e a média por ponto continua certa, escondendo o erro. Confira `COUNT(*)` antes e depois.
+5. **Remendar a multiplicação com `DISTINCT`.** `COUNT(DISTINCT id)` salva a contagem, mas não a soma; `AVG(DISTINCT valor)` elimina valores iguais, não linhas repetidas. Agregue o lado "muitos" antes de juntar.
+6. **Agregado no `WHERE`.** Erro (`misuse of aggregate`): no passo do `WHERE`, os grupos ainda não existem. Use o `HAVING`.
+7. **Coluna solta no `GROUP BY`.** O SQLite escolhe um valor sem avisar; no PostgreSQL é erro. Agregue ou agrupe.
+8. **Escolher o agregado errado para a pergunta.** "Em qualquer amostra" é `MIN` (ou uma contagem de violações), não `AVG`. A média esconde o pior dia.
+9. **Agregar parâmetros de unidades diferentes.** O `AVG(valor)` sem `GROUP BY parametro` mistura mg/L, pH e UNT e devolve um número sem significado.
+10. **Esquecer o `PRAGMA foreign_keys = ON`.** No SQLite, o `REFERENCES` é só documentação até você ligar a conferência, a cada conexão e fora de uma transação.
+11. **`to_sql(..., if_exists="replace")`.** O pandas recria a tabela sem chave primária, sem chave estrangeira e sem `CHECK`. Crie a tabela com `CREATE TABLE` e use `append`.
+12. **O `groupby` do pandas descarta o grupo `NaN`**, e o `GROUP BY` do SQL não. A mesma pergunta, 5 grupos contra 6. Use `dropna=False`.
+13. **Dividir por zero, ou mostrar 100% para quem não tem dados.** Use `NULLIF` e deixe o resultado `NULL`: sem dados não é "conforme".
+14. **Comparar números reais com `==`.** Médias têm erros de arredondamento; compare com `math.isclose` e uma tolerância declarada.
+15. **Confiar sem reconciliar.** Um `JOIN` que multiplica linhas passa em qualquer leitura a olho. Só uma segunda conta independente (Python, pandas, outra consulta) o denuncia.
+
+## Exercícios {#sec-p107-exercicios}
+
+Os gabaritos rodam na mesma sessão do capítulo (usam o banco `banco`, as listas, as constantes e as funções definidas acima). Tente sempre responder **antes** de abrir.
+
+**Exercício 1 (preveja as linhas).** Sem rodar, diga quantas linhas devolve cada junção: (a) `ponto JOIN fonte` pelo código do ponto; (b) `ponto LEFT JOIN fonte`; (c) `ponto LEFT JOIN resultado`; (d) `resultado JOIN parametro` pelo código do parâmetro. Depois confira com a função `linhas_apos_join` **e** com o SQLite.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 1
+```python
+codigos_ponto = [codigo for codigo, _d in PONTOS]
+casos = {
+    "a": (codigos_ponto, chaves_fonte, "interno", "SELECT COUNT(*) FROM ponto po JOIN fonte f ON f.ponto = po.codigo"),
+    "b": (codigos_ponto, chaves_fonte, "externo", "SELECT COUNT(*) FROM ponto po LEFT JOIN fonte f ON f.ponto = po.codigo"),
+    "c": (codigos_ponto, chaves_resultado, "externo", "SELECT COUNT(*) FROM ponto po LEFT JOIN resultado r ON r.ponto = po.codigo"),
+    "d": ([r[2] for r in RESULTADOS], [p[0] for p in PARAMETROS], "interno",
+          "SELECT COUNT(*) FROM resultado r JOIN parametro p ON p.codigo = r.parametro"),
+}
+ex1 = {letra: (linhas_apos_join(esq, dir_, tipo), banco.execute(sql).fetchone()[0]) for letra, (esq, dir_, tipo, sql) in casos.items()}
+print(ex1)
+assert all(previsto_ == contado for previsto_, contado in ex1.values())
+assert {letra: previsto_ for letra, (previsto_, _c) in ex1.items()} == {"a": 4, "b": 6, "c": 21, "d": 20}
+```
+Resultado: **4**, **6**, **21** e **20**. (a) só P02 e P03 têm fontes, duas cada: 4. (b) o `LEFT JOIN` acrescenta P01 e P04 (uma linha cada, com `NULL`): 6. (c) P01 tem 9 resultados, P02 9, P03 2 e P04, sem nenhum, ainda ocupa uma linha: 21. (d) cada resultado tem **um** parâmetro (a chave estrangeira garante), e a junção não multiplica: continuam 20.
+:::
+
+**Exercício 2 (a média passa, o mínimo reprova).** Numa **cópia** do banco, acrescente um resultado de OD de **4,9 mg/L** em P01, em 12/11/2024. Que pontos o `HAVING AVG(valor) < 5` aponta? E o `HAVING MIN(valor) < 5`? Qual consulta responde à exigência legal "em qualquer amostra"?
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 2
+```python
+copia_ex2 = sqlite3.connect(":memory:")
+banco.backup(copia_ex2)
+copia_ex2.execute("INSERT INTO resultado (ponto, data, parametro, valor) VALUES ('P01', '2024-11-12', 'OD', 4.9)")
+base = "SELECT ponto FROM resultado WHERE parametro = 'OD' GROUP BY ponto HAVING {agregado}(valor) < ? ORDER BY ponto"  # {agregado}: nosso texto
+por_media = [linha[0] for linha in copia_ex2.execute(base.format(agregado="AVG"), (OD_MINIMO_MG_L,))]
+por_minimo = [linha[0] for linha in copia_ex2.execute(base.format(agregado="MIN"), (OD_MINIMO_MG_L,))]
+media_p01 = copia_ex2.execute("SELECT AVG(valor) FROM resultado WHERE parametro = 'OD' AND ponto = 'P01'").fetchone()[0]
+copia_ex2.close()
+od_p01 = [v for p, _d, par, v in RESULTADOS if p == "P01" and par == "OD"] + [4.9]
+print(por_media, por_minimo, round(media_p01, 4))
+assert por_media == ["P02"] and por_minimo == ["P01", "P02"]
+assert math.isclose(media_p01, statistics.mean(od_p01), abs_tol=TOL_EXATA)
+assert banco.execute("SELECT COUNT(*) FROM resultado").fetchone()[0] == 20  # o banco do capítulo não mudou
+```
+Resultado: a média aponta só **P02**; o mínimo aponta **P01 e P02**. A média de P01, com o 4,9, é 6,825 mg/L (acima de 5), e esconde uma amostra que a Resolução não admite. Para "em qualquer amostra", a consulta certa é a do `MIN` (ou uma contagem das amostras abaixo do limite).
+:::
+
+**Exercício 3 (o ausente na média).** Calcule a média da turbidez de **P02** por SQL de dois modos (ignorando o ausente e tratando-o como zero) e em Python. Qual a diferença, e em qual dos dois modos P02 parece "melhor" do que é?
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 3
+```python
+media_p02_ignora, media_p02_zero, n_linhas_p02, n_medidos_p02 = banco.execute(
+    "SELECT AVG(valor), AVG(COALESCE(valor, 0)), COUNT(*), COUNT(valor) "
+    "FROM resultado WHERE ponto = 'P02' AND parametro = 'turbidez'").fetchone()
+valores_p02 = [v for p, _d, par, v in RESULTADOS if p == "P02" and par == "turbidez"]
+medidos_p02 = [v for v in valores_p02 if v is not None]
+print(media_p02_ignora, media_p02_zero, n_linhas_p02, n_medidos_p02)
+assert math.isclose(media_p02_ignora, statistics.mean(medidos_p02), abs_tol=TOL_EXATA)
+assert math.isclose(media_p02_zero, sum(medidos_p02) / len(valores_p02), abs_tol=TOL_EXATA)
+assert (n_linhas_p02, n_medidos_p02) == (3, 2)
+assert math.isclose(media_p02_ignora, 97.5, abs_tol=TOL_EXATA) and math.isclose(media_p02_zero, 65.0, abs_tol=TOL_EXATA)
+```
+Resultado: **97,5** UNT ignorando o ausente (a média de 135 e 60) e **65,0** tratando-o como zero. A diferença é de 32,5 UNT, e é o modo do zero que faz o P02 parecer "melhor" (65 está abaixo do limite de 100; 97,5 também, mas por pouco). Com os dados reais, uma diferença assim muda uma conclusão.
+:::
+
+**Exercício 4 (o LEFT JOIN que não perde ninguém).** Escreva a consulta que devolve, para **cada ponto cadastrado**, quantos resultados de **pH** ele tem. Escreva também a versão com o filtro no `WHERE` e explique o que se perde.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 4
+```python
+certo = banco.execute("""
+SELECT po.codigo, COUNT(r.id)
+FROM ponto po
+LEFT JOIN resultado r ON r.ponto = po.codigo AND r.parametro = 'pH'
+GROUP BY po.codigo
+ORDER BY po.codigo
+""").fetchall()
+errado = banco.execute("""
+SELECT po.codigo, COUNT(r.id)
+FROM ponto po
+LEFT JOIN resultado r ON r.ponto = po.codigo
+WHERE r.parametro = 'pH'
+GROUP BY po.codigo
+ORDER BY po.codigo
+""").fetchall()
+ph_por_ponto = Counter(r[0] for r in RESULTADOS if r[2] == "pH")
+print(certo, errado)
+assert certo == [(codigo, ph_por_ponto[codigo]) for codigo, _d in PONTOS] == [("P01", 3), ("P02", 3), ("P03", 1), ("P04", 0)]
+assert errado == [("P01", 3), ("P02", 3), ("P03", 1)]
+```
+Resultado: com o filtro no `ON`, o P04 aparece com **0**; com o filtro no `WHERE`, o P04 **desaparece** (a linha dele tem `r.parametro` igual a `NULL`, e `NULL = 'pH'` é desconhecido).
+:::
+
+**Exercício 5 (por que 5,3250?).** Sem rodar, explique por que a média do OD depois do `JOIN` interno com `fonte` (5,3250) é **menor** que a correta (6,2429), e depois calcule, em Python, quantos valores entram em cada média (interna e `LEFT`) e quanto soma cada uma.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 5
+```python
+soma_interna, n_interno = sum(valores_internos), len(valores_internos)
+soma_externa, n_externo = sum(valores_externos), len(valores_externos)
+print(round(soma_interna, 1), n_interno, round(soma_interna / n_interno, 4), "|", round(soma_externa, 1), n_externo, round(soma_externa / n_externo, 4))
+assert (n_interno, n_externo) == (8, 11)
+assert math.isclose(soma_interna, 42.6, abs_tol=TOL_EXATA) and math.isclose(soma_externa, 65.0, abs_tol=TOL_EXATA)
+assert math.isclose(soma_interna / n_interno, media_interna, abs_tol=TOL_EXATA)
+assert math.isclose(soma_externa / n_externo, media_externa, abs_tol=TOL_EXATA)
+```
+Resultado: no `JOIN` interno entram **8** valores (os 3 de P02 e o 1 de P03, cada um duas vezes), somando **42,6**: 42,6 / 8 = 5,325. Os 3 valores altos de P01 (7,8; 7,5; 7,1) **sumiram**, e os de P02, que são baixos (6,1; 4,8; 3,9), pesam em dobro: a média cai. No `LEFT JOIN` entram **11** valores (3 de P01, 6 de P02, 2 de P03), somando **65,0**: 65,0 / 11 = 5,9091.
+:::
+
+**Exercício 6 (a coluna solta).** (a) Escreva `SELECT ponto, MAX(valor)` para os resultados de OD, agrupando por ponto. (b) Corrija `SELECT ponto, valor FROM resultado GROUP BY ponto` **acrescentando** o `valor` ao `GROUP BY`. Quantas linhas voltam em cada caso? A versão (b) responde à pergunta original?
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 6
+```python
+ex6_a = banco.execute("SELECT ponto, MAX(valor) FROM resultado WHERE parametro = 'OD' GROUP BY ponto ORDER BY ponto").fetchall()
+ex6_b = banco.execute("SELECT ponto, valor FROM resultado GROUP BY ponto, valor").fetchall()
+maiores_od = {p: max(v) for p, v in od_por_ponto_python.items()}
+print(ex6_a, len(ex6_b))
+assert ex6_a == [(p, maiores_od[p]) for p in sorted(maiores_od)] == [("P01", 7.8), ("P02", 6.1), ("P03", 6.5)]
+pares_ponto_valor = {(p, v) for p, _d, _par, v in RESULTADOS}
+assert len(pares_ponto_valor) == len(RESULTADOS)  # nestes dados nenhum par (ponto, valor) se repete
+assert len(ex6_b) == len(pares_ponto_valor) == 20
+```
+Resultado: (a) **3** linhas, um máximo por ponto (7,8; 6,1; 6,5). (b) **20** linhas: agrupar por `ponto` **e** `valor` forma um grupo para cada par diferente. Nestes dados nenhum par `(ponto, valor)` se repete (o `assert` confere), por isso o resultado tem o mesmo tamanho da tabela; se houvesse dois resultados iguais no mesmo ponto, eles se fundiriam numa linha só. A consulta deixou de dar erro (no PostgreSQL), mas deixou de responder à pergunta: acrescentar ao `GROUP BY` **muda a pergunta**. A saída certa é decidir o que se quer do `valor` de cada ponto (o máximo, a média...) e agregar.
+:::
+
+**Desafio (do formato longo ao largo).** Escreva **uma única consulta** que devolva, para cada ponto cadastrado (inclusive P04), uma linha com a **média** de cada parâmetro em colunas separadas (`od`, `ph`, `turbidez`), usando `AVG(CASE WHEN ... THEN valor END)`. Confira com o `pivot_table` do pandas. Por fim, mostre o que acontece se você escrever o `CASE` com `ELSE 0`.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do desafio
+```python
+sql_largo = """
+SELECT po.codigo AS ponto,
+       ROUND(AVG(CASE WHEN r.parametro = 'OD'       THEN r.valor END), 2) AS od,
+       ROUND(AVG(CASE WHEN r.parametro = 'pH'       THEN r.valor END), 2) AS ph,
+       ROUND(AVG(CASE WHEN r.parametro = 'turbidez' THEN r.valor END), 2) AS turbidez
+FROM ponto po
+LEFT JOIN resultado r ON r.ponto = po.codigo
+GROUP BY po.codigo
+ORDER BY po.codigo
+"""
+largo_sql = banco.execute(sql_largo).fetchall()
+
+largo_pandas = df.pivot_table(index="ponto", columns="parametro", values="valor", aggfunc="mean").reindex([c for c, _d in PONTOS])
+largo_pandas_linhas = [(ponto, *[None if pd.isna(x) else float(x) for x in largo_pandas.loc[ponto, ["OD", "pH", "turbidez"]]])
+                       for ponto in largo_pandas.index]
+print(largo_sql)
+assert mesmas_linhas(largo_sql, largo_pandas_linhas, tol=TOL_DUAS_CASAS)
+assert largo_sql[3] == ("P04", None, None, None) and largo_sql[2][3] is None  # P04 sem nada; P03 sem turbidez
+
+com_else_zero = banco.execute("""
+SELECT ROUND(AVG(CASE WHEN r.parametro = 'OD' THEN r.valor ELSE 0 END), 2)
+FROM resultado r WHERE r.ponto = 'P01'
+""").fetchone()[0]
+print("OD médio de P01 com ELSE 0:", com_else_zero)
+assert math.isclose(com_else_zero, round(sum(v for p, _d, par, v in RESULTADOS if p == "P01" and par == "OD") / 9, 2), abs_tol=TOL_EXATA)
+```
+Resultado: P01 tem OD 7,47, pH 7,03 e turbidez 13,0; P02, 4,93, 6,3 e 97,5; P03, 6,5, 7,4 e `NULL` (nunca teve turbidez); e P04, `NULL` em tudo. O pandas, que não conhece o P04 (ele não tem resultados), só concorda depois do `reindex` com a lista de pontos cadastrados. O `CASE` **sem** `ELSE` devolve `NULL` para as linhas dos outros parâmetros, e o `AVG` as ignora: é isso que faz a técnica funcionar. Com `ELSE 0`, as 6 linhas de pH e de turbidez de P01 entram como zeros na média do OD, que cai de 7,47 para **2,49**: o mesmo erro do ausente-como-zero, vestido de pivô.
+:::
+
+## Entregável {#sec-p107-entregavel}
+
+No **seu repositório de treino** (o do P0-00), tudo por issue e pull request:
+
+1. crie `qualidade_agua/esquema.py` com o `CREATE TABLE` das quatro tabelas e uma função `conectar(caminho)` que **sempre** executa `PRAGMA foreign_keys = ON` logo após abrir a conexão;
+2. crie `qualidade_agua/consultas.py` com quatro funções que recebem a conexão e devolvem listas de tuplas: a média por parâmetro, os pontos com algum OD abaixo do mínimo (com `MIN`), o relatório de conformidade por ponto (com `LEFT JOIN`) e a contagem de fontes por ponto (com a tabela derivada);
+3. crie `tests/test_consultas.py` com um teste por consulta, comparando com o cálculo equivalente em Python sobre as listas originais (o molde da @sec-p107-pratica);
+4. inclua **três testes de armadilha**: (a) uma chave estrangeira inexistente é recusada pela sua função `conectar`; (b) o `LEFT JOIN` com o filtro no `WHERE` perde o ponto sem coleta, e com o filtro no `ON` não; (c) o `JOIN` entre `resultado` e `fonte` muda a média do OD, e a versão com tabela derivada não;
+5. abra um issue "Esquema e consultas com junções", resolva-o por pull request com `Closes #N`, veja os testes ficarem verdes no GitHub e registre a mudança no `CHANGELOG.md`;
+6. no Notion, marque o *Nível atual* do módulo P1-07 e a data da próxima revisão.
+
+Se você tem **dados reais** (uma estação, uma lista de pontos e de fontes), carregue-os com o mesmo esquema e repita a pergunta da @sec-p107-pratica, **sem preencher os valores que faltam** (ausente é `NULL`) e sem juntar duas tabelas "filhas" antes de agregar.
+
+## Autoavaliação {#sec-p107-autoavaliacao}
+
+| Nível | Você consegue... |
+|:--|:--|
+| **1 · Reconheço** | Dizer o que são chave primária, chave estrangeira e cardinalidade; ler um `SELECT` com `GROUP BY`, `HAVING`, `JOIN` e `LEFT JOIN`; reconhecer `COUNT(*)`, `COUNT(coluna)`, `AVG` e `NULLIF`. |
+| **2 · Explico** | Explicar a ordem em que o banco lê uma consulta e por que o agregado não cabe no `WHERE`; por que `AVG` ignora o `NULL` e o `COUNT(*)` não; como o `LEFT JOIN` vira `INNER JOIN` com o filtro no `WHERE`; por que o `JOIN` entre duas tabelas "filhas" multiplica linhas e o que sobrevive e o que não sobrevive à multiplicação; e três diferenças entre o SQLite e o PostgreSQL. |
+| **3 · Executo** | Criar tabelas ligadas por chave estrangeira, ligar a conferência no SQLite, escrever as consultas deste capítulo sem consultá-lo, **prever o número de linhas** de uma junção e reconciliar cada resposta com Python e com o pandas (`groupby`, `merge` com `validate`). |
+| **4 · Ensino** | Montar uma aula de 40 minutos em que a turma recebe duas tabelas, **prevê** o resultado de um `JOIN` e de um `AVG` antes de rodar, descobre a multiplicação de linhas pela contagem e propõe a correção, discutindo por que o erro "quase certo" (a média por ponto intacta) é o mais perigoso. |
+
+## O que foi testado e o que não foi {#sec-p107-limites}
+
+**Testado:** todo o código do capítulo roda de ponta a ponta, em ordem, no Linux, com Python 3.13, SQLite 3.45.1, pandas 3.0.5 e matplotlib 3.11.2, e os números de destaque do texto são conferidos pelo teste automático do livro (`tests/test_modulo_p1.py`, que executa o mesmo código e compara os valores calculados com os citados); a prosa inteira não é verificada frase a frase. As consultas foram comparadas com cálculo independente em Python (e, quando aplicável, com o pandas). As sondas de dialeto rodaram no SQLite ao vivo.
+
+**Não testado:**
+
+* o código **não foi executado no Windows**, nem com outras versões do SQLite, do Python (as células sem o pandas e sem gráficos foram executadas também nas versões 3.11 e 3.12; a parte do pandas e a figura, só na 3.13) ou do pandas (o `to_sql` e o `validate` foram verificados só na 3.0.5; em outras versões, o erro de uma gravação recusada pode chegar como `DatabaseError` ou como o erro do próprio SQLite);
+* o registro do **PostgreSQL** (versão 16.15, Linux, 08/10/2026), tanto as sondas de dialeto quanto a comparação das 27 consultas, é uma execução real, mas **não é reexecutado** pelos testes automáticos (o `tools/registro_postgresql_p1-07.sql` só é conferido quanto ao conteúdo), e outras versões podem diferir;
+* a **renderização** pelo Quarto e a aparência da figura no site publicado;
+* os testes deste capítulo **não rodam no GitHub Actions**: o `testes.yml` e o `publicar.yml` rodam só o projeto de chuva e o `test_estrutural`. O Quarto executa as células ao publicar, mas não roda `tests/test_modulo_p1.py`; este teste roda no computador de quem edita o livro (`python tests/test_modulo_p1.py`);
+* **desde qual versão** do SQLite existem `string_agg`, `RIGHT JOIN` e `FULL JOIN`: a versão testada os aceita, e eu não verifiquei o histórico;
+* se resoluções posteriores à CONAMA 357/2005 (410/2009 e 430/2011) alteraram os três limites. Os dados são **sintéticos**; os limites têm fonte, mas confira a versão consolidada antes de usá-los em trabalho real;
+* o desempenho de qualquer consulta: com 20 linhas, nada disso foi medido, e **índices** não foram tratados.
+
+## Para ir além {#sec-p107-alem}
+
+* **O próximo passo:** o P1-08 (SQL essencial III) ensina subconsultas, `WITH`, restrições e transações; o P3-09 e o P3-12 levam o SQL a um servidor e a um aplicativo.
+* **Documentação do SQLite**, na ordem do capítulo: *SQLite Foreign Key Support* (sqlite.org/foreignkeys.html), *Aggregate Functions* (sqlite.org/lang_aggfunc.html), *SELECT* (sqlite.org/lang_select.html) e *CREATE TABLE* (sqlite.org/lang_createtable.html).
+* **PostgreSQL:** o *Tutorial* (postgresql.org/docs/16/tutorial.html), nas seções sobre junções e funções de agregação.
+* **pandas:** o guia de usuário, nas partes *Group by: split-apply-combine* e *Merge, join, concatenate and compare*, e a página de `DataFrame.to_sql` (leia a opção `if_exists`).
+* **Modelagem:** pesquise "normalização" e "tabela associativa" para o muitos-para-muitos de verdade, que este capítulo só nomeou.
+* **Resolução CONAMA nº 357/2005:** use o texto consolidado, no site do CONAMA ou do órgão ambiental da sua região, e confira as alterações posteriores.
+
+```{python}
+#| label: p107-fim
+#| echo: false
+banco.close()
+```
