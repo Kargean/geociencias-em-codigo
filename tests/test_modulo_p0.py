@@ -1,9 +1,9 @@
 """Testes do módulo P0-00: os capítulos executam, os números citados no texto conferem e a configuração do GitHub é válida.
 
-Execute:  python tests/test_modulo_p0.py        (leva cerca de 30 s: roda os cinco capítulos de ponta a ponta)
+Execute:  python tests/test_modulo_p0.py        (leva cerca de 30 s: roda os seis capítulos de ponta a ponta)
 
 O que este arquivo garante:
-  1. todos os blocos de código dos cinco capítulos (e os gabaritos) executam sem erro;
+  1. todos os blocos de código dos seis capítulos (e os gabaritos) executam sem erro;
   2. os números que o texto cita são os que o código calcula;
   3. os arquivos de configuração do GitHub (workflows, formulários de issue, Dependabot, CITATION) são válidos;
   4. as cópias do workflow mostradas no livro são lidas dos arquivos reais (e a versão de treino é derivada deles);
@@ -11,8 +11,10 @@ O que este arquivo garante:
   6. os comandos `gh` e as opções citadas nos capítulos existem na versão instalada (se `gh` estiver instalado);
   7. as afirmações sobre "mutações que sobrevivem" são verdadeiras.
 """
+import builtins
 import contextlib
 import io
+import os
 import re
 import shutil
 import subprocess
@@ -20,6 +22,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import yaml
 
@@ -30,6 +33,7 @@ from executar_codigo_qmd import executar  # noqa: E402
 
 CAPITULOS = [
     "p0-00-visao-geral.qmd",
+    "p0-00-semana0-alicerce.qmd",
     "p0-00-semana1-git-local.qmd",
     "p0-00-semana2-python-testes.qmd",
     "p0-00-semana3-github.qmd",
@@ -47,7 +51,7 @@ def yaml_de(caminho):
 
 
 class Capitulos(unittest.TestCase):
-    """Executa os cinco capítulos uma vez e guarda o espaço de nomes e a saída de cada um."""
+    """Executa os seis capítulos uma vez e guarda o espaço de nomes e a saída de cada um."""
 
     @classmethod
     def setUpClass(cls):
@@ -60,6 +64,128 @@ class Capitulos(unittest.TestCase):
             except SystemExit:
                 raise AssertionError(f"{nome}: um bloco de código falhou.\n{buffer.getvalue()[-3000:]}")
             cls.saida[nome] = buffer.getvalue()
+
+    # -- Semana 0 ---------------------------------------------------------------------------------------------
+    def test_semana0_numeros_citados(self):
+        ns, saida = self.ns["p0-00-semana0-alicerce.qmd"], self.saida["p0-00-semana0-alicerce.qmd"]
+        texto = ler("p0-00-semana0-alicerce.qmd")
+        # "São as quatro verificações": a matriz do fluxo de testes, lida do arquivo real
+        self.assertEqual(
+            ns["combinacoes"],
+            [("ubuntu-latest", "3.11"), ("ubuntu-latest", "3.12"), ("ubuntu-latest", "3.13"), ("windows-latest", "3.13")],
+        )
+        self.assertIn("4 combinações", saida)
+        # as contas das docstrings: 1 mm sobre 1 ha = 10 m³; 25 mm sobre 2 ha = 500 m³
+        self.assertEqual(ns["volume_de_chuva_m3"](1, 1), 10)
+        self.assertEqual(ns["volume_de_chuva_m3"](25.0, 2.0), 500.0)
+        self.assertEqual(ns["conferir_docstring"](ns["volume_de_chuva_m3"]), (0, 1))
+        self.assertEqual(ns["conferir_docstring"](ns["volume_errado_m3"]), (1, 1))
+        self.assertIn("falhas, tentativas: (0, 1)", saida)
+        self.assertIn("falhas, tentativas: (1, 1)", saida)
+        # as impressões digitais dos dados conferem
+        self.assertIn("confere", saida)
+        self.assertNotIn("MUDOU", saida)
+        # a docstring que falta é a de `estacoes_em` (o texto diz que o nome basta)
+        self.assertIn("estacoes_em          (sem docstring)", saida)
+        # os comentários que o texto menciona existem nos arquivos lidos
+        qualidade, resumo_py = ler("projeto_chuva/chuva/qualidade.py"), ler("projeto_chuva/chuva/resumo.py")
+        self.assertIn("Regra de decisão: viram None", qualidade)
+        self.assertIn("a linha 1 é o cabeçalho", qualidade)
+        self.assertIn("convenção do ETCCDI", resumo_py)
+        # o .venv é ignorado pelo .gitignore real e o laboratório mostrou isso
+        self.assertIn(".venv/", ler(".gitignore"))
+        self.assertIn("!! .venv/", saida)
+        self.assertRegex(saida, r"\.gitignore:\d+:\.venv/\t\.venv/pyvenv\.cfg")
+        # o texto cita o formulário de issue `erro-no-livro`
+        self.assertTrue((RAIZ / ".github" / "ISSUE_TEMPLATE" / "erro-no-livro.yml").is_file())
+        # "a rotina de nove passos", "quatro maneiras de rodar", "cinco perguntas do README"
+        rotina = texto.split("A rotina, em ordem:")[1].split("A primeira linha do")[0]
+        self.assertEqual(len(re.findall(r"^\| \d \|", rotina, re.M)), 9)
+        niveis = texto.split("| Nível | O que você faz |")[1].split("**Nível B**")[0]
+        self.assertEqual(len(re.findall(r"^\| \*\*[A-D]\. ", niveis, re.M)), 4)
+        self.assertEqual(len(ns["PERGUNTAS"]), 5)
+        # "dez termos do vocabulário": há pelo menos dez
+        vocabulario = texto.split("## O vocabulário, em três tabelas")[1].split("## Um passeio")[0]
+        self.assertGreaterEqual(len(re.findall(r"^\| \*\*", vocabulario, re.M)), 10)
+        # o esqueleto de README do texto responde às cinco perguntas
+        esqueleto = re.search(r"```markdown\n(.*?)```", texto, re.S).group(1)
+        self.assertEqual(ns["perguntas_sem_resposta"](esqueleto), [])
+        # a docstring do exercício 3 passa, a do desafio de nomes é idempotente
+        self.assertEqual(ns["conferir_docstring"](ns["mm_para_litros"]), (0, 1))
+        self.assertEqual(ns["nome_seguro"]("Relatório FINAL (v2).docx"), "relatorio_final_v2.docx")
+
+    def test_semana0_sql_numeros_citados(self):
+        ns, saida = self.ns["p0-00-semana0-alicerce.qmd"], self.saida["p0-00-semana0-alicerce.qmd"]
+        # E02 tem três linhas, mas COUNT(mm) conta duas e a média é 7,5 (o SQL ignora o NULL); E01: 14,0
+        self.assertEqual(sum(1 for estacao, _dia, _mm in ns["medicoes"] if estacao == "E02"), 3)
+        self.assertEqual(ns["resultado_sql"], [("E01", 3, 14.0), ("E02", 2, 7.5)])
+        self.assertEqual(ns["resultado_sql"], ns["resultado_py"])
+        self.assertIn("SQL e Python concordam: True", saida)
+        # injeção: colando o texto devolve as seis linhas; com parâmetro, zero
+        self.assertEqual(len(ns["medicoes"]), 6)
+        self.assertEqual((ns["colando"], ns["com_parametro"]), (6, 0))
+        # o esquema real do projeto cria as duas tabelas citadas pelo texto
+        self.assertEqual(ns["tabelas"], ["chuva_diaria", "estacao"])
+        # gabarito do exercício 6: só E01 passa de 10 mm; com o ausente tratado como zero, E02 daria 5,0
+        self.assertEqual(ns["acima"], [("E01", 14.0)])
+        self.assertEqual(ns["com_zero"], 5.0)
+        # o texto menciona o arquivo que existe e os módulos de SQL do roteiro
+        self.assertTrue((RAIZ / "projeto_chuva" / "sql" / "esquema.sql").is_file())
+        texto = ler("p0-00-semana0-alicerce.qmd")
+        self.assertIn("P1-06 a P1-08", texto)
+
+    def test_semana0_servidores_numeros_citados(self):
+        ns, saida = self.ns["p0-00-semana0-alicerce.qmd"], self.saida["p0-00-semana0-alicerce.qmd"]
+        texto = ler("p0-00-semana0-alicerce.qmd")
+        # o servidor de brinquedo devolve a mesma resposta do SQL local (E01 14,0; E02 7,5, NULL ignorado)
+        self.assertEqual(ns["medias"], [["E01", 3, 14.0], ["E02", 2, 7.5]])
+        self.assertIn("servidor e SQL local concordam: True", saida)
+        # escuta só nesta máquina, numa porta escolhida pelo sistema (a porta muda; o endereço não)
+        self.assertEqual(ns["servidor"].server_address[0], "127.0.0.1")
+        self.assertIsInstance(ns["porta"], int)
+        self.assertGreater(ns["porta"], 0)
+        # autenticação e permissão: o leitor lê as 6 linhas, não escreve; senha errada nem executa
+        self.assertEqual(ns["leitura_do_leitor"], 6)
+        self.assertFalse(ns["tentativa_do_leitor"]["ok"])
+        self.assertIn("readonly", ns["tentativa_do_leitor"]["erro"])
+        self.assertEqual(ns["senha_errada"], {"ok": False, "erro": "autenticação falhou"})
+        # quatro clientes ao mesmo tempo: 6 + 4 linhas, nenhuma perdida
+        self.assertEqual(ns["total_de_linhas"], 10)
+        # depois do desligamento a conexão é recusada (no Linux, ConnectionRefusedError; qualquer OSError no resto)
+        self.assertTrue(issubclass(getattr(builtins, ns["nome_do_erro"]), OSError))
+        self.assertIn("servidor desligado:", saida)
+        # a pasta temporária foi removida
+        self.assertFalse(ns["arquivo_do_banco"].exists())
+        # gabarito do exercício 7: duas conexões em memória são bancos separados; o leitor enxerga o que o aluno gravou
+        self.assertTrue(ns["bancos_separados"])
+        self.assertEqual(ns["media_vista_pelo_leitor"], (12 + 0 + 30 + 18) / 4)
+        self.assertEqual(ns["media_vista_pelo_leitor"], 15.0)
+        # o registro estático do PostgreSQL não é executado: confere o que o texto cita contra o SQLite do capítulo
+        registro = re.search(r"```text\n(\$ psql.*?)```", texto, re.S).group(1)
+        tabela = re.findall(r"(E0\d)\s+\|\s+(\d+)\s+\|\s+([\d.]+)", registro)
+        self.assertEqual([(e, int(n), float(m)) for e, n, m in tabela], ns["resultado_sql"])
+        for trecho in (
+            "postgresql://aluno@localhost:5432/ambiental",
+            "function round(double precision, integer) does not exist",
+            "ROUND(AVG(mm)::numeric, 1)",
+            "permission denied for table chuva",
+            "password authentication failed",
+            "Connection refused",
+        ):
+            self.assertIn(trecho, registro)
+        self.assertIn("PostgreSQL 16.15", texto)
+        self.assertIn("(30 execuções seguidas, sem falha)", texto)
+        self.assertIn("P3-12", texto)
+        self.assertNotIn("P3-11", texto)
+
+    def test_semana0_blocos_bash_nao_usam_a_continuacao_do_powershell(self):
+        # os blocos `bash` são para o Git Bash (continuação com \\); o acento grave pertence aos blocos `powershell`
+        texto = ler("p0-00-semana0-alicerce.qmd")
+        blocos_bash = re.findall(r"```bash\n(.*?)```", texto, re.S)
+        self.assertGreater(len(blocos_bash), 3)
+        for bloco in blocos_bash:
+            self.assertNotIn("`", bloco)
+        self.assertIn("```powershell", texto)
 
     # -- Semana 2 ---------------------------------------------------------------------------------------------
     def test_semana2_numeros_citados(self):
@@ -175,10 +301,29 @@ class ConfiguracaoDoGitHub(unittest.TestCase):
         self.assertIn("Closes #", ler(".github/pull_request_template.md"))
         self.assertIn("* text=auto", ler(".gitattributes"))
         gitignore = ler(".gitignore")
-        for padrao in ("__pycache__/", "*.db"):
+        for padrao in ("__pycache__/", "*.db", ".venv/"):
             self.assertIn(padrao, gitignore)
+        # o Quarto acrescenta sozinho estas duas linhas EXATAS quando faltam e deixaria o clone "sujo"
+        linhas = [l.strip() for l in gitignore.splitlines()]
+        self.assertIn("/.quarto/", linhas)
+        self.assertIn("**/*.quarto_ipynb", linhas)
         self.assertIn("tests/test_modulo_p0.py", ler("CLAUDE.md"))
         self.assertIn("## [Não lançado]", ler("CHANGELOG.md"))
+
+
+class LaboratorioDeGit(unittest.TestCase):
+    def test_ambiente_isolado_mas_com_o_que_o_windows_exige(self):
+        from geocodigo.laboratorio_git import Laboratorio
+
+        falso = {"SYSTEMROOT": r"C:\Windows", "USERPROFILE": r"C:\Users\leitor", "APPDATA": r"C:\Users\leitor\AppData", "HOME": "/home/leitor"}
+        with mock.patch.dict(os.environ, falso):
+            laboratorio = Laboratorio()
+            env = laboratorio._env()
+        self.assertEqual(env["SYSTEMROOT"], r"C:\Windows")                      # o Windows exige no `env` do subprocess
+        self.assertEqual(env["HOME"], str(laboratorio.home))                      # mas o HOME é o do laboratório
+        self.assertNotIn("USERPROFILE", env)
+        self.assertNotIn("APPDATA", env)
+        laboratorio.limpar()
 
 
 class Estrutura(unittest.TestCase):

@@ -14,9 +14,9 @@
 5. escrever **testes** que provam que o código faz o que se diz, inclusive um teste que compara dois caminhos de cálculo (Python e SQL);
 6. manter o material vivo: registrar mudanças, corrigir erros e evoluir o roteiro sem perder o fio.
 
-**Pré-requisitos:** nenhum conhecimento de programação. Você precisa de um computador onde possa instalar programas e de uma conta no GitHub.
+**Pré-requisitos:** nenhum conhecimento de programação, de Git ou de GitHub. Você precisa de um computador onde possa instalar programas e de uma conta no GitHub. Se os termos *repositório*, *commit* e *terminal* ainda soam estranhos, é para isso que existe a **Semana 0**.
 
-**Tempo sugerido:** 4 semanas, cerca de 3 h por semana. Cada semana tem um capítulo.
+**Tempo sugerido:** 5 semanas (a Semana 0 e as Semanas 1 a 4), cerca de 3 a 4 h por semana. Cada semana tem um capítulo.
 :::
 
 ## O projeto: chuva em quatro estações {#sec-projeto}
@@ -40,10 +40,11 @@ Os dados são **sintéticos de propósito**: como nós plantamos cada defeito em
 
 A regra é simples: digite no seu repositório de treino; quando travar, compare com `projeto_chuva/` no livro. Errar no repositório de treino é grátis, e é o melhor jeito de aprender Git.
 
-## O mapa das quatro semanas {#sec-mapa-semanas}
+## O mapa das cinco semanas {#sec-mapa-semanas}
 
-| Semana | Tema | Entregável no seu repositório de treino |
+| Semana | Tema | Entregável |
 |:--|:--|:--|
+| 0 | **Alicerce**: o que são Git e GitHub, o vocabulário, como documentar e organizar, e como rodar os exemplos no seu computador | ambiente conferido, passeio pelo repositório do livro e um glossário seu |
 | 1 | **Git**: a história do projeto, ver o que mudou, desfazer, enviar ao GitHub | repositório criado, 5 commits com boas mensagens, uma tag, tudo enviado |
 | 2 | **Python e testes**: ler e limpar o CSV, testar | `qualidade.py` com testes passando e commitados |
 | 3 | **GitHub**: branches, pull requests, issues, testes automáticos, proteção da `main` | um issue, um pull request com testes verdes, o selo de testes no README |
@@ -65,7 +66,9 @@ gh --version         # opcional, recomendado: a ferramenta de linha de comando d
 * **Editor:** qualquer editor de texto serve; o VS Code facilita porque mostra o Git ao lado do código.
 * **GitHub CLI (`gh`):** cli.github.com. Ela faz o login e permite criar repositórios, issues e pull requests sem sair do terminal. Tudo que ela faz também dá para fazer no site; usamos os dois.
 
-Nada deste módulo exige instalar pacotes Python: o projeto usa só a biblioteca padrão. Isso é de propósito, para você aprender os fundamentos sem depender de instalações.
+O **projeto** deste módulo não exige instalar pacotes Python: usa só a biblioteca padrão. Isso é de propósito, para você aprender os fundamentos sem depender de instalações. (Para executar também o **código dos capítulos**, e não só o projeto, são necessários dois pacotes; a @sec-s0-rodar explica.)
+
+**Terminal no Windows.** Os blocos de comando do livro (`bash`) foram escritos para o Git Bash. No PowerShell, os comandos de Git e de Python são os mesmos, mas três coisas mudam: a continuação de linha (`\` vira acento grave), o `&&` (que o Windows PowerShell 5.1 não aceita) e a ativação do ambiente virtual. A tabela está na @sec-s0-terminal.
 
 ## Como ler as saídas do Git neste módulo {#sec-saidas}
 

@@ -37,10 +37,10 @@ O foco é a **pilha de ferramentas** da análise e modelagem ambiental, do bási
 | P10 | WebGIS e automação de mapas, relatórios e pipelines |
 | P11 | Publicação, ensino e projetos integradores |
 
-O estudo **começa pelo módulo P0-00** (@sec-p000): um projeto do início ao fim, em quatro semanas, que ensina Git e GitHub, Python, SQL e testes (inclusive testes automáticos no GitHub) em cima de um mesmo conjunto de dados de chuva. O **capítulo de exemplo desenvolvido** é *Atitudes e projeção estereográfica* (@sec-estrutural-atitudes), módulo P9-06; ele mostra o método completo (fenômeno, modelo mínimo, figura, experimento, testes) aplicado a um tema de geologia.
+O estudo **começa pelo módulo P0-00** (@sec-p000): um projeto do início ao fim, em cinco semanas (a Semana 0, o alicerce, parte do zero: o que são Git e GitHub, o vocabulário, como documentar e como rodar os exemplos), que ensina Git e GitHub, Python, SQL e testes (inclusive testes automáticos no GitHub) em cima de um mesmo conjunto de dados de chuva. O **capítulo de exemplo desenvolvido** é *Atitudes e projeção estereográfica* (@sec-estrutural-atitudes), módulo P9-06; ele mostra o método completo (fenômeno, modelo mínimo, figura, experimento, testes) aplicado a um tema de geologia.
 O acompanhamento de estudo (módulos, níveis e datas) fica no Notion; o código e o livro, neste repositório.
 
 ::: {.callout-warning}
 ## Estado atual
-Estão escritos o módulo de partida **P0-00** (visão geral e quatro capítulos de semana) e o capítulo de exemplo do P9-06. O restante do mapa será produzido semana a semana, sob demanda, com os mesmos critérios, e este livro é corrigido e atualizado pelo mesmo processo que o módulo P0-00 ensina (@sec-ciclo).
+Estão escritos o módulo de partida **P0-00** (visão geral e cinco capítulos de semana, da Semana 0 à 4) e o capítulo de exemplo do P9-06. O restante do mapa será produzido semana a semana, sob demanda, com os mesmos critérios, e este livro é corrigido e atualizado pelo mesmo processo que o módulo P0-00 ensina (@sec-ciclo).
 :::

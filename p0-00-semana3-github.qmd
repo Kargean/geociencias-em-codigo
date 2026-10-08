@@ -281,6 +281,14 @@ gh issue create --title "Dias de chuva usa > em vez de >=" \
   --label erro-no-livro
 ```
 
+No PowerShell, a continuação de linha é o acento grave em vez da barra invertida (veja a @sec-s0-terminal):
+
+```powershell
+gh issue create --title "Dias de chuva usa > em vez de >=" `
+  --body "Com valor exatamente 1,0 mm o dia não conta como chuvoso; o ETCCDI usa >= 1 mm." `
+  --label erro-no-livro
+```
+
 Outros recursos que valem conhecer quando houver muitos issues: **milestones** (agrupam issues numa meta, como "v0.2.0") e **Projects** (um quadro estilo kanban com as colunas *A fazer / Fazendo / Feito*). Para uma pessoa só, rótulos e milestones bastam.
 
 ## Pull requests: propor, testar, juntar {#sec-s3-pr}

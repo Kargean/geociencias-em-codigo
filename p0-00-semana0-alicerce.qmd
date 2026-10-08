@@ -1,0 +1,1443 @@
+# Semana 0 · Alicerce: Git, GitHub e o seu ambiente de trabalho {#sec-p000-s0}
+
+::: {.callout-note icon=false}
+## Neste capítulo
+
+**Pergunta que guia tudo:** o que é, de fato, cada peça que vou usar (Git, GitHub, terminal, editor, pasta, Python), para que serve cada uma, e como organizo e documento o meu trabalho para conseguir repeti-lo, desfazê-lo e explicá-lo?
+
+**Você vai ser capaz de:**
+
+1. dizer em uma frase o que são Git, GitHub, repositório, commit, ramo, remoto, issue e pull request, e onde cada um aparece;
+2. distinguir as peças do seu ambiente (navegador, editor, terminal, pasta do projeto, Python) e saber qual usar em cada tarefa;
+3. rodar os exemplos do livro de quatro maneiras, da mais simples (ler) à mais completa (renderizar o livro), mantendo o **seu** trabalho separado do livro;
+4. escolher, para cada informação, o lugar certo onde escrevê-la: comentário, docstring, mensagem de commit, README, CHANGELOG, issue ou teste;
+5. seguir uma rotina curta a cada sessão de estudo (atualizar, trabalhar, conferir, gravar, enviar) e reconhecer os primeiros erros típicos;
+6. dizer o que é um banco de dados relacional e o que é SQL, onde rodar uma consulta e qual é a diferença entre um banco em arquivo (SQLite) e um banco em servidor (PostgreSQL): cliente, servidor, host, porta, usuário e permissão (só o essencial: o estudo sistemático de SQL vem nos módulos P1-06 a P1-08).
+
+**Pré-requisitos:** nenhum. Este capítulo parte do zero. Se Git, Python e a CLI `gh` ainda não estão instalados, comece pela @sec-instalar. O VS Code (editor gratuito) é recomendado, mas não obrigatório.
+
+**Tempo sugerido:** 4 h 30, em duas sessões: (1) da @sec-s0-mapa até a @sec-s0-passeio, só leitura e exploração do site; (2) da @sec-s0-documentar até a @sec-s0-entregavel, no seu computador.
+:::
+
+## O mapa numa página {#sec-s0-mapa}
+
+Quem começa a programar mistura, na cabeça, coisas que são diferentes. Vale separá-las logo, com uma analogia de laboratório:
+
+| Peça | O que é | Analogia | Exemplo |
+|:--|:--|:--|:--|
+| **Pasta do projeto** | uma pasta comum do computador, com os seus arquivos | a bancada onde está o experimento | `Documents\geociencias-em-codigo` |
+| **Editor** | programa em que você escreve e salva arquivos de texto e de código | o caderno de campo | VS Code, Bloco de Notas |
+| **Terminal** | janela em que você **digita comandos** e lê a resposta | o painel de instrumentos: você manda, ele responde | PowerShell, Git Bash |
+| **Python** | a linguagem e o programa que **executa** o código | o instrumento que faz a medição | `python arquivo.py` |
+| **Git** | programa (comandado pelo terminal) que **guarda a história** dos arquivos da pasta | o caderno de laboratório: cada entrada com data, autor e justificativa | `git commit` |
+| **GitHub** | **site** que guarda uma cópia da história na nuvem e acrescenta ferramentas de colaboração | o arquivo central da instituição, com sala de reuniões | github.com |
+| **Navegador** | o programa com que você abre sites | a janela para o arquivo central | Edge, Chrome, Firefox |
+
+Uma confusão comum: o **PowerShell não é um navegador**. É um terminal, uma janela de texto para digitar comandos. Você usa **dois lugares** com funções diferentes: o **navegador**, para ler o livro e usar o site do GitHub, e o **terminal** (de preferência dentro do editor), para mandar comandos ao Git e ao Python. A @fig-s0-mapa mostra quem fala com quem.
+
+```{python}
+#| label: fig-s0-mapa
+#| echo: false
+#| fig-cap: "As peças do seu ambiente. Dentro do computador, o editor escreve arquivos na pasta do projeto e o terminal comanda o Git e o Python. Do terminal, quem conversa com o GitHub é o Git (`push`, `pull`, `clone`) e a CLI `gh`. O navegador é outro caminho até o mesmo site."
+import matplotlib.pyplot as plt
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
+
+fig, ax = plt.subplots(figsize=(10.4, 4.9))
+ax.set_xlim(0, 14.8)
+ax.set_ylim(-0.1, 5.7)
+ax.axis("off")
+
+
+def zona(x, y, w, h, titulo, cor):
+    ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.05,rounding_size=0.2", fc=cor, ec="#889", lw=1.2, ls="--"))
+    ax.text(x + 0.25, y + h - 0.3, titulo, fontsize=9, fontweight="bold", color="#556", va="center")
+
+
+def caixa(x, y, w, h, titulo, sub, cor):
+    ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.04,rounding_size=0.15", fc=cor, ec="#556", lw=1.2))
+    ax.text(x + w / 2, y + h * 0.68, titulo, ha="center", va="center", fontsize=9.6, fontweight="bold")
+    ax.text(x + w / 2, y + h * 0.28, sub, ha="center", va="center", fontsize=8, color="#333")
+
+
+def seta(a, b, rotulo="", pos=(0, 0), cor="#1b5e9e", duas=False, ha="center", rad=0.0):
+    estilo = "<|-|>" if duas else "-|>"
+    ax.add_patch(FancyArrowPatch(a, b, arrowstyle=estilo, mutation_scale=14, color=cor, lw=1.6, shrinkA=0, shrinkB=0,
+                                 connectionstyle=f"arc3,rad={rad}"))
+    if rotulo:
+        ax.text((a[0] + b[0]) / 2 + pos[0], (a[1] + b[1]) / 2 + pos[1], rotulo, ha=ha, va="center", fontsize=8.2,
+                family="monospace", color=cor, bbox=dict(fc="white", ec="none", pad=1.2))
+
+
+zona(0.1, 0.0, 8.7, 5.5, "SEU COMPUTADOR", "#fbfbfb")
+zona(9.8, 0.0, 4.9, 5.5, "GITHUB (NA NUVEM)", "#f6f0fa")
+
+caixa(0.5, 3.5, 2.6, 1.1, "Editor", "escreve e salva", "#fdf2d9")
+caixa(5.7, 3.5, 2.6, 1.1, "Pasta do projeto", "arquivos + pasta .git", "#e5f5e8")
+caixa(0.5, 1.5, 2.6, 1.1, "Terminal", "recebe os comandos", "#e3f0fb")
+caixa(5.7, 1.5, 2.6, 1.1, "Git", "guarda a história", "#e5f5e8")
+caixa(2.9, 0.15, 2.6, 0.95, "Python", "executa o código", "#fdf2d9")
+
+caixa(10.2, 3.6, 4.1, 1.1, "Repositório remoto", "cópia da história (origin)", "#ece0f5")
+caixa(10.2, 2.0, 4.1, 1.1, "Issues e pull requests", "registro, revisão, discussão", "#ece0f5")
+caixa(10.2, 0.4, 4.1, 1.1, "Actions e Pages", "testes automáticos; o livro online", "#ece0f5")
+caixa(5.9, 0.15, 2.4, 0.95, "Navegador", "o site do GitHub e o livro", "#fdf2d9")
+
+seta((3.1, 4.05), (5.7, 4.05), "salva", cor="#555")
+seta((3.1, 2.05), (5.7, 2.05), "git ...")
+seta((1.8, 1.5), (2.9, 0.75), "python ...", pos=(-0.55, -0.1))
+seta((7.0, 2.6), (7.0, 3.5), "guarda e restaura", duas=True, pos=(-1.35, 0), cor="#555")
+seta((8.3, 2.05), (10.2, 3.95), "push\npull\nclone", duas=True, pos=(-0.05, -0.15), cor="#7b3fa0")
+seta((8.3, 0.62), (10.2, 0.95), "você lê\ne clica", pos=(0.2, -0.5), cor="#555")
+ax.set_title("Quem faz o quê: o computador e o GitHub", fontsize=10.5, pad=2)
+fig.tight_layout()
+plt.show()
+```
+
+Guarde esta imagem. Quando algo der errado, a primeira pergunta é sempre: **em que peça estou?** Digitei um comando de Git no navegador? Estou no terminal, mas na pasta errada? Editei o arquivo, mas esqueci de salvar?
+
+## O que é o Git e o que é o GitHub {#sec-s0-git-github}
+
+O **Git** é um programa de **controle de versões**. Ele não é um site nem precisa de internet. Roda no seu computador e guarda, dentro da pasta do projeto, uma história completa: cada gravação (*commit*) registra o estado de todos os arquivos, uma mensagem, o autor e a data. A @sec-git-problema mostra o problema que isso resolve (`relatorio_final_v2_agora_vai.docx`).
+
+O **GitHub** é um **site** (um serviço da empresa de mesmo nome) que guarda uma cópia dessa história na nuvem. Como muita gente usa o mesmo site, ele acrescentou ferramentas de trabalho em grupo.
+
+| | **Git** | **GitHub** |
+|:--|:--|:--|
+| O que é | programa | site (serviço) |
+| Onde roda | no seu computador | na internet |
+| Precisa de conta? | não | sim (gratuita) |
+| Precisa de internet? | não | sim |
+| Para que serve | guardar versões, ver o que mudou, desfazer | cópia na nuvem, trabalho em grupo, testes automáticos, publicação |
+| Como se usa | comandos no terminal (`git ...`) | navegador, e comandos do Git ou da CLI `gh` |
+| Alternativas ao serviço | | GitLab, Bitbucket, Codeberg (o Git é o mesmo) |
+
+Você pode usar o Git sem o GitHub (o histórico fica só no seu computador). O contrário só existe em parte: dá para mexer em arquivos direto pelo site, mas por baixo o GitHub guarda tudo como um repositório Git. Os quatro ganhos de usar o GitHub, e onde você os verá neste módulo:
+
+1. **Cópia de segurança** e acesso de outro computador: o repositório fica na nuvem (@sec-s0-passeio e Semana 1).
+2. **Colaboração e registro:** *issues* anotam o que precisa ser feito; *pull requests* propõem e revisam mudanças (Semana 3).
+3. **Automação:** o *GitHub Actions* roda os testes sozinho a cada mudança (Semana 3).
+4. **Publicação:** o *GitHub Pages* publica um site a partir do repositório. É assim que este livro está no ar.
+
+::: {.callout-tip}
+## Conta, visibilidade e privacidade
+
+Um repositório pode ser **público** (qualquer pessoa vê) ou **privado** (só quem você convidar). Seu nome de usuário aparece nos endereços (`github.com/SEU-USUARIO/...`). O e-mail dos commits em repositório público também fica visível, como avisa a @sec-git-config. Material de trabalho com dados reais ou ainda não publicados deve ficar **privado**.
+:::
+
+## O vocabulário, em três tabelas {#sec-s0-vocabulario}
+
+Quase todo termo do Git e do GitHub é um nome comum com um sentido preciso. Aprenda os termos em três grupos, conforme **onde** a coisa acontece. A coluna da direita mostra o comando ou o lugar onde você a encontra.
+
+**No seu computador (Git):**
+
+| Termo | O que é | Analogia | Comando ou lugar |
+|:--|:--|:--|:--|
+| **repositório** (*repo*) | a pasta do projeto **mais** a pasta oculta `.git`, onde mora toda a história | a pasta do experimento com o caderno de laboratório dentro | `git init`, `git clone` |
+| **commit** | uma fotografia do projeto, com mensagem, autor e data | uma entrada datada e assinada no caderno | `git commit -m "..."` |
+| **hash** | o código (40 caracteres, os 7 primeiros costumam bastar) que identifica um commit | o número de tombo de uma amostra | `git log --oneline` |
+| **pasta de trabalho** | os arquivos que você vê e edita | a bancada | o explorador de arquivos |
+| **área de preparação** (*stage*) | o rascunho do próximo commit: o que você escolheu gravar | a bandeja das amostras prontas para registro | `git add` |
+| **ramo** (*branch*) | uma linha de história paralela, para testar algo sem mexer na principal | uma cópia de trabalho para um experimento: se der certo, junta; se não, descarta | `git switch -c nome` |
+| **main** | o ramo principal, a versão "oficial" do projeto | o caderno oficial | `git branch` |
+| **HEAD** | "você está aqui": o commit em que a pasta de trabalho está | o marcador de página | `git log` mostra `HEAD -> main` |
+| **tag** | uma etiqueta num commit, para marcar um marco | o rótulo "versão entregue ao cliente" | `git tag` |
+| **merge** | juntar dois ramos | integrar o experimento ao caderno oficial | `git merge` |
+| **conflito** | duas mudanças na mesma linha: o Git não decide, pede a você | dois colegas anotaram valores diferentes na mesma célula | `git status` avisa |
+| **`.gitignore`** | lista do que o Git deve ignorar | a lista do que não vai para o arquivo | arquivo na raiz |
+
+**Entre o computador e o GitHub:**
+
+| Termo | O que é | Comando |
+|:--|:--|:--|
+| **remoto** (*remote*) e **`origin`** | o endereço do repositório no GitHub; `origin` é o apelido usual | `git remote -v` |
+| **clone** | baixar uma cópia completa (com toda a história) | `git clone URL` |
+| **push** | enviar ao GitHub os commits que só você tem | `git push` |
+| **fetch** | trazer do GitHub o que há de novo, **sem** juntar ao seu trabalho | `git fetch` |
+| **pull** | `fetch` seguido de `merge`: trazer e juntar | `git pull` |
+| **fork** | cópia de um repositório de outra pessoa para a sua conta (não usamos neste módulo) | botão *Fork* no site |
+
+**No site do GitHub:**
+
+| Termo | O que é | Analogia |
+|:--|:--|:--|
+| **issue** | ficha de registro de um erro, ideia ou tarefa | o registro de ocorrência do laboratório |
+| **pull request** (PR) | pedido para juntar um ramo à `main`, com revisão e testes | a proposta de alteração anexada ao caderno oficial para aprovação |
+| **Actions** e **workflow** | o "robô" do GitHub que executa comandos (por exemplo, os testes) a cada mudança; a receita é um arquivo YAML em `.github/workflows/` | o técnico que repete o ensaio toda vez que a amostra muda |
+| **CI** (integração contínua) | a prática de testar automaticamente toda mudança | |
+| **release** | uma versão publicada, com notas, ligada a uma tag | a edição numerada do relatório |
+| **Pages** | o site publicado a partir do repositório | a vitrine |
+| **README** | a página de rosto do repositório, mostrada abaixo da lista de arquivos | a capa do caderno |
+
+E dois formatos de arquivo que aparecem por toda parte: **Markdown** (texto simples com marcas como `#` e `**`, que vira página formatada; veja a @sec-s0-markdown) e **YAML** (arquivo de configuração em que a **indentação** faz parte do significado).
+
+Para reter: **o Git guarda; o GitHub compartilha; o pull request propõe; o Actions confere.**
+
+## Um passeio pelo repositório real do livro {#sec-s0-passeio}
+
+Nada ensina mais do que olhar um repositório de verdade. Abra, no navegador, `https://github.com/Kargean/geociencias-em-codigo` (o repositório deste livro). Na barra superior da página há abas. As que importam agora:
+
+| Aba | O que mostra | Onde aprendemos |
+|:--|:--|:--|
+| **Code** | a lista de arquivos, o `README.md` desenhado embaixo, o seletor de ramo e o contador de commits (o relógio com um número leva à história) | Semana 1 |
+| **Issues** | as fichas abertas e fechadas | Semana 3 |
+| **Pull requests** | as propostas de mudança, abertas e juntadas | Semana 3 |
+| **Actions** | cada execução dos testes e da publicação, com o resultado | Semana 3 |
+| **Settings** | as configurações (inclusive onde se ativa o Pages); só o dono vê | Semana 3 |
+
+O GitHub muda a interface de tempos em tempos: se uma aba mudou de nome ou de lugar, procure a equivalente e registre a diferença num issue (formulário *Erro no livro*). É assim que este material se mantém atualizado.
+
+### A história de um erro real, do início ao fim
+
+O primeiro erro de verdade deste projeto foi achado pelo primeiro leitor, rodando os testes num Windows. Ele percorreu o ciclo completo que o módulo ensina. Siga-o no site:
+
+| Passo | O que aconteceu | Onde ver |
+|:--|:--|:--|
+| 1 | O leitor rodou os testes no Windows: 103 passaram e 1 deu erro (`errors=1`), com `PermissionError: [WinError 32]` | o terminal dele |
+| 2 | O problema foi registrado no **issue nº 4** | aba *Issues* → *Closed* |
+| 3 | Foi criado o ramo `fix/fechar-conexao-windows`, com a correção e o teste | cabeçalho do PR 5 (o ramo foi apagado depois do merge, como manda o fluxo) |
+| 4 | Um **pull request**, o nº 5, propôs juntar o ramo à `main`; o texto começa com `Closes #4` | aba *Pull requests* → *Closed* |
+| 5 | O **Actions** rodou os testes (no PR, aba *Checks*) | aba *Actions* |
+| 6 | O PR foi juntado por *squash*: os commits do ramo viraram **um** na `main`, com `(#5)` no fim da mensagem | *Code* → contador de commits |
+| 7 | Ao juntar, o GitHub **fechou o issue 4 sozinho**, por causa do `Closes #4` | *Issues* → *Closed* |
+
+Dois detalhes do site: issues e pull requests **dividem a mesma numeração** (por isso o 4 é um issue e o 5 é um PR; os números 1 e 2 são pull requests abertos pelo Dependabot, um serviço que propõe sozinho a atualização de versões). E repare que cada peça aponta para a outra (issue, ramo, PR, testes, commit): ficou fácil responder, meses depois, "por que o código fecha a conexão neste ponto?".
+
+Hoje o fluxo de testes roda em mais de uma combinação de sistema e de versão do Python. Quantas? A resposta está num arquivo do próprio repositório, que o Python lê:
+
+```{python}
+#| code-fold: true
+#| code-summary: "Ver o código"
+import yaml
+from pathlib import Path
+
+fluxo = yaml.safe_load(Path(".github/workflows/testes.yml").read_text(encoding="utf-8"))
+matriz = fluxo["jobs"]["testes"]["strategy"]["matrix"]
+combinacoes = [(so, py) for so in matriz["os"] for py in matriz["python"]]
+combinacoes += [(extra["os"], extra["python"]) for extra in matriz.get("include", [])]
+for sistema, versao in combinacoes:
+    print(f"{sistema:15} Python {versao}")
+print(len(combinacoes), "combinações")
+```
+
+São as quatro verificações que aparecem na aba *Checks* de um pull request (o fluxo se chama "Testes"; o outro, "Publicar livro", monta e publica o site). O arquivo é **a fonte da verdade**; o texto do livro apenas o cita.
+
+::: {.callout-important}
+## Faça agora (15 minutos)
+
+Com o site aberto, responda: (1) qual é o título do issue 4? (2) qual é o nome do ramo do PR 5, e quantos commits e arquivos ele tem? (3) o que diz a primeira linha da descrição do PR 5? (4) na aba *Actions*, qual é o resultado da última execução de "Publicar livro" e o que significa cada ícone (verde, vermelho, cinza)? (5) no `README.md`, o que a seção "Licença" diz? Anote as respostas; o gabarito do exercício 1 confere o que dá para conferir. Se preferir o terminal, os comandos abaixo mostram o mesmo (precisam do login feito com `gh auth login`):
+
+```bash
+gh issue view 4 --repo Kargean/geociencias-em-codigo
+gh pr view 5 --repo Kargean/geociencias-em-codigo
+```
+:::
+
+## Documentar, organizar e comentar {#sec-s0-documentar}
+
+Documentar não é "escrever um manual no fim". É deixar, **no momento em que a decisão é tomada**, o rastro que permite a você (daqui a seis meses) e a outras pessoas entender, repetir e confiar. A dificuldade é saber **onde** escrever cada coisa.
+
+::: {.callout-note}
+## Sobre o código dos blocos deste capítulo
+
+Você ainda não estudou Python (isso começa na Semana 2). **Não precisa entender cada linha:** leia o texto e a **saída** de cada bloco. Os blocos mais longos vêm dobrados; clique em *Ver o código* se tiver curiosidade.
+:::
+
+### Cada informação tem o seu lugar {#sec-s0-lugares}
+
+| A pergunta que alguém vai fazer | Onde a resposta mora | Exemplo neste projeto |
+|:--|:--|:--|
+| O que é este projeto e como eu o rodo? | **README** | `projeto_chuva/README.md` |
+| O que esta função faz, e como se usa? | **docstring** (texto logo abaixo do `def`) | `resumo.total_mensal` |
+| Por que esta decisão ou este número? | **comentário** ao lado e **constante com nome** | `LIMIAR_DIA_CHUVOSO_MM` |
+| O que mudou neste commit, e por quê? | **mensagem de commit** | `git log` |
+| O que mudou de uma versão para outra? | **CHANGELOG** | `CHANGELOG.md` |
+| Qual é o problema ou a ideia? Como foi resolvido e testado? | **issue** e **pull request** | issue 4 e PR 5 (@sec-s0-passeio) |
+| Isto continua funcionando? | **testes** | `projeto_chuva/tests/` |
+| Quais são as regras do projeto? | **arquivo de regras**: o convencional é o `CONTRIBUTING.md`, que o GitHub mostra a quem abre issues e pull requests; neste livro, o `CLAUDE.md` | `CLAUDE.md` |
+
+Uma frase resume a divisão: o **código** diz *como*; o **comentário** diz *por quê*; a **docstring** diz *o quê e como usar*; o **teste** diz *o que deve continuar verdadeiro*.
+
+### Markdown em dois minutos {#sec-s0-markdown}
+
+README, issues, pull requests e este livro são escritos em **Markdown**: texto comum com algumas marcas, que o GitHub (ou o Quarto) transforma em página formatada. Você já leu muito dele sem saber.
+
+| Você escreve | Aparece como |
+|:--|:--|
+| `# Título` e `## Subtítulo` | títulos (um `#` por nível) |
+| `**negrito**` e `*itálico*` | **negrito** e *itálico* |
+| `` `codigo` `` (entre crases) | `codigo`, em fonte de máquina de escrever |
+| `* item` ou `1. item` | lista com marcadores ou numerada |
+| `[texto do link](https://exemplo.org)` | um link |
+| `- [ ] tarefa` | caixa de seleção (em issues e pull requests) |
+
+Um **bloco de código** abre e fecha com três crases (`` ``` ``) em linhas próprias. Uma **tabela** usa barras verticais para separar as colunas e uma segunda linha de traços (`|:--|:--|`). Se tiver dúvida, o botão *Preview* de qualquer caixa de texto do GitHub mostra o resultado antes de salvar, e o VS Code abre uma prévia do `.md` com `Ctrl+Shift+V`.
+
+### Comentários que ajudam e comentários que atrapalham {#sec-s0-comentarios}
+
+Veja a mesma função escrita de três maneiras. As três **fazem exatamente a mesma coisa**; só uma é boa para quem lê:
+
+```{python}
+LIMIAR_DIA_CHUVOSO_MM = 1.0  # convenção ETCCDI: dia com chuva tem >= 1 mm; abaixo disso, dia seco
+
+
+# Versão 1: nomes que não dizem nada e um número solto
+def f(d):
+    return [x for x in d if x >= 1.0]
+
+
+# Versão 2: o comentário só repete o que o código já diz
+def g(d):
+    # percorre d e guarda os x maiores ou iguais a 1.0
+    return [x for x in d if x >= 1.0]
+
+
+# Versão 3: o nome diz O QUÊ; a constante e o comentário dizem POR QUÊ
+def dias_com_chuva(chuva_mm_por_dia):
+    """Devolve só os dias com chuva (>= LIMIAR_DIA_CHUVOSO_MM)."""
+    return [mm for mm in chuva_mm_por_dia if mm >= LIMIAR_DIA_CHUVOSO_MM]
+
+
+serie_mm = [0.0, 0.2, 3.4, 1.0, 12.5]
+print(f(serie_mm), g(serie_mm), dias_com_chuva(serie_mm), sep="\n")
+assert f(serie_mm) == g(serie_mm) == dias_com_chuva(serie_mm) == [3.4, 1.0, 12.5]
+```
+
+Na versão 1, ninguém sabe o que é `1.0` nem por que `>=` e não `>`. Na versão 2, o comentário gasta uma linha para dizer o que o código já diz, e vai ficar **errado** no dia em que o código mudar. Na versão 3, o nome torna o comentário do corpo desnecessário, e o **único** comentário que sobrou registra uma *decisão* que o código não consegue expressar (de onde vem o 1 mm). Regras que decorrem disso:
+
+1. **Comente o porquê, não o quê.** Se precisa explicar o *quê*, melhore o nome.
+2. **Coloque unidades nos nomes** (`chuva_mm`, `area_ha`, `LIMIAR_DIA_CHUVOSO_MM`). É a documentação que mais evita erro em ciência.
+3. **Um comentário que contradiz o código é pior do que nenhum.** Mude os dois no mesmo commit.
+4. **Não deixe código antigo comentado.** O Git já guarda o que você apagou.
+5. **Marque pendências** com `TODO` e o número do issue (por exemplo, `# TODO #12: tratar chuva acima de 300 mm`), para não se perderem.
+
+O projeto de chuva segue essas regras. Estes são os comentários reais dos dois módulos principais, lidos dos arquivos (não copiados para o livro):
+
+```{python}
+#| code-fold: true
+#| code-summary: "Ver o código"
+from pathlib import Path
+
+for arquivo in ("qualidade.py", "resumo.py"):
+    linhas = Path("projeto_chuva/chuva", arquivo).read_text(encoding="utf-8").splitlines()
+    for numero, linha in enumerate(linhas, 1):
+        if (linha.lstrip().startswith("#") or "  # " in linha) and ">>>" not in linha:
+            print(f"{arquivo}:{numero}: {linha.strip()}")
+```
+
+Repare no que eles têm em comum: quase todos dizem *por quê* (por que a contagem começa em 2, por que o limiar é de 1 mm, por que o texto "sem medida" vira `None`). Os que dizem *o quê* explicam algo que o código não mostra sozinho: uma expressão regular, o significado de um campo. Os que começam com "Regra de decisão" registram uma escolha do projeto ao lado da constante que a guarda, o que cumpre uma das regras do método do projeto (no arquivo `CLAUDE.md`): decisões de limpeza e de limiar ficam em constantes nomeadas e documentadas.
+
+### Docstrings: o manual embutido {#sec-s0-docstrings}
+
+Uma **docstring** é um texto entre três aspas, escrito logo depois do `def`. Ela vira o manual da função: aparece em `help(funcao)`, em `funcao.__doc__` e na dica que o editor mostra ao passar o mouse. A convenção (PEP 257) pede uma **primeira linha** com uma frase-resumo do que a função faz, uma linha em branco e, se precisar, os detalhes (unidades, o que acontece com dado ausente). Um bom hábito, que não vem da PEP e sim do módulo `doctest`, é incluir um **exemplo** que começa com `>>>`: o computador o executa.
+
+Veja quais funções públicas do módulo `resumo` têm docstring, e o que a primeira linha de cada uma diz:
+
+```{python}
+#| code-fold: true
+#| code-summary: "Ver o código"
+import inspect
+import sys
+
+sys.path.insert(0, "projeto_chuva")  # para o Python achar o pacote `chuva` deste módulo
+from chuva import resumo
+
+for nome, funcao in inspect.getmembers(resumo, inspect.isfunction):
+    if funcao.__module__ == resumo.__name__ and not nome.startswith("_"):
+        doc = inspect.getdoc(funcao)
+        print(f"{nome:20} {doc.splitlines()[0] if doc else '(sem docstring)'}")
+```
+
+A função `estacoes_em` não tem docstring, e tudo bem: o nome e o tipo já dizem tudo. Docstring não é obrigação em toda função; é obrigação onde o nome **não basta** (unidade, caso de borda, regra de decisão).
+
+O melhor exemplo dentro de uma docstring é aquele que o computador **executa**. Escrevemos uma função nova, com a conta explicada e um exemplo, e pedimos ao módulo `doctest` que confira:
+
+```{python}
+import doctest
+
+
+def volume_de_chuva_m3(chuva_mm, area_ha):
+    """Volume de água, em m³, de uma chuva sobre uma área.
+
+    A conta: 1 mm sobre 1 m² é 1 litro, e 1 ha são 10 000 m²; logo, 1 mm sobre 1 ha são 10 m³.
+
+    >>> volume_de_chuva_m3(25.0, 2.0)
+    500.0
+    """
+    return chuva_mm * area_ha * 10.0
+
+
+def conferir_docstring(funcao):
+    """Executa os exemplos `>>>` da docstring e devolve (falhas, tentativas)."""
+    teste = doctest.DocTestParser().get_doctest(funcao.__doc__, {funcao.__name__: funcao}, funcao.__name__, "docstring", 0)
+    executor = doctest.DocTestRunner(verbose=False)
+    executor.run(teste)
+    return tuple(executor.summarize(verbose=False))
+
+
+help(volume_de_chuva_m3)
+print("falhas, tentativas:", conferir_docstring(volume_de_chuva_m3))
+```
+
+Agora a mesma função com uma documentação que **mente** (promete 50 em vez de 500):
+
+```{python}
+def volume_errado_m3(chuva_mm, area_ha):
+    """Mesma conta, mas a docstring promete o número errado.
+
+    >>> volume_errado_m3(25.0, 2.0)
+    50.0
+    """
+    return chuva_mm * area_ha * 10.0
+
+
+print("falhas, tentativas:", conferir_docstring(volume_errado_m3))
+```
+
+O `doctest` mostrou o que estava escrito (*Expected*) e o que o código devolveu (*Got*). É por isso que o projeto de chuva tem `tests/test_doctests.py`: a documentação dos módulos `qualidade` e `resumo` roda junto com os testes, e uma docstring desatualizada **faz o teste falhar**, em vez de envelhecer em silêncio. No dia a dia, `python -m doctest -v arquivo.py` roda os exemplos de um arquivo.
+
+### Nomes e pastas {#sec-s0-nomes}
+
+Nomes bons são documentação gratuita. Para arquivos e pastas:
+
+* **minúsculas, sem espaços e sem acentos**, com `_` ou `-` entre as palavras (um padrão por projeto: o livro usa hífen nas pastas e nos capítulos, mas um módulo Python precisa de `_`, porque o hífen não faz parte de um nome importável). Isso evita problemas em scripts e endereços, e entre sistemas: o Windows e o macOS, por padrão, tratam `Dados.csv` e `dados.csv` como o mesmo arquivo; o Linux (e as máquinas `ubuntu-latest` do GitHub Actions) trata como dois;
+* **datas no formato ISO** (`2026-10-08`), que ordenam em ordem cronológica;
+* **nada de `final`, `v2`, `novo`, `(1)`**: a versão mora no Git;
+* o nome diz o **conteúdo**, não a situação.
+
+| Antes | Depois | Por quê |
+|:--|:--|:--|
+| `Relatório FINAL v2 (REVISADO).docx` | `relatorio_2026-10-08.docx` | sem espaço nem acento; versão no Git |
+| `dados chuva (1).csv` | `chuva_diaria.csv` | o `(1)` é uma cópia duplicada; o nome diz o conteúdo |
+| `d`, `x`, `tmp2` | `serie`, `chuva_mm`, `registros` | a variável diz o que guarda |
+| `limiar = 1.0` | `LIMIAR_DIA_CHUVOSO_MM = 1.0` | unidade no nome; constantes em MAIÚSCULAS |
+| `def calc(a, b)` | `def total_mensal(registros)` | nome de função é um verbo ou um resultado |
+
+Em Python, a convenção (PEP 8) é `minusculas_com_sublinhado` para variáveis e funções, `MAIUSCULAS` para constantes e `CamelCase` para classes.
+
+Para as **pastas**, o projeto de chuva é um bom modelo. Esta é a árvore real, lida do disco (sem os arquivos gerados):
+
+```{python}
+#| code-fold: true
+#| code-summary: "Ver o código"
+def arvore(pasta, prefixo="", nivel=2):
+    """Imprime a árvore de uma pasta até `nivel` níveis, sem lixo gerado (__pycache__, .pyc, .db)."""
+    itens = [p for p in Path(pasta).iterdir() if p.name != "__pycache__" and p.suffix not in {".pyc", ".db"}]
+    itens.sort(key=lambda p: (p.is_file(), p.name))
+    for i, p in enumerate(itens):
+        ultimo = i == len(itens) - 1
+        print(prefixo + ("└── " if ultimo else "├── ") + p.name + ("/" if p.is_dir() else ""))
+        if p.is_dir() and nivel > 1:
+            arvore(p, prefixo + ("    " if ultimo else "│   "), nivel - 1)
+
+
+print("projeto_chuva/")
+arvore("projeto_chuva")
+```
+
+Cada pasta tem **uma** função: `chuva/` é o código, `dados/` são os dados de entrada, `sql/` são as consultas, `tests/` são os testes. O `README.md` na raiz explica o resto. Uma regra de ouro vale para a pasta de dados: **dado bruto não se edita à mão.** Toda limpeza é feita por código, que fica registrado, e o arquivo original ganha uma "impressão digital" para que qualquer mudança seja notada. O projeto guarda essas impressões no arquivo `SHA256SUMS`, e um teste as confere. Você pode conferir também:
+
+```{python}
+#| code-fold: true
+#| code-summary: "Ver o código"
+import hashlib
+
+for linha in Path("projeto_chuva/dados/SHA256SUMS").read_text(encoding="utf-8").splitlines():
+    esperado, nome = linha.split()
+    real = hashlib.sha256(Path("projeto_chuva/dados", nome).read_bytes()).hexdigest()
+    print(f"{nome:18} {'confere' if real == esperado else 'MUDOU'}  {real[:12]}...")
+```
+
+### Mensagens de commit, issues e pull requests {#sec-s0-mensagens}
+
+A Semana 1 (@sec-git-mensagens) detalha as duas regras do commit (uma ideia por commit; primeira linha curta, no imperativo). Aqui, o **corpo**: quando a mudança precisa de explicação, deixe uma linha em branco depois da primeira e escreva o **porquê**, não o quê (o *quê* o `git diff` mostra). Pelo terminal, repita o `-m`: cada `-m` vira um parágrafo (`git commit -m "Título" -m "Corpo"`). Sem `-m`, o Git abre um editor de texto que, conforme o que foi escolhido na instalação, pode ser o Vim, difícil para quem está começando; a caixa de mensagem do painel *Source Control* do VS Code também serve. Exemplo (o número do issue é inventado):
+
+```text
+Aceita vírgula decimal na leitura do CSV
+
+O fornecedor manda "12,4" em algumas linhas. Sem a troca, float() falha
+e o dia inteiro virava ausente. Agora a vírgula vira ponto antes da
+conversão.
+
+Closes #7
+```
+
+O mesmo raciocínio vale para o GitHub: o **issue** diz *qual é o problema e como reproduzi-lo* (o que você fez, o que esperava, o que aconteceu); o **pull request** diz *o que muda, como foi testado e o que pode quebrar*. Os formulários do repositório (`.github/ISSUE_TEMPLATE/`) e o modelo de pull request já trazem essas perguntas: use-os, e as respostas ficam completas sem esforço.
+
+### README, CHANGELOG, licença e citação {#sec-s0-readme}
+
+O **README** é a primeira coisa que alguém vê no repositório. Ele precisa responder a **cinco perguntas**, nesta ordem:
+
+1. **O que é?** (uma ou duas frases, para quem é)
+2. **Como rodo?** (os comandos, copiáveis, e a versão do Python)
+3. **Como testo?** (o comando que mostra "OK")
+4. **Onde fica cada coisa?** (o mapa de pastas)
+5. **Posso usar? Como cito?** (licença e citação)
+
+Um esqueleto em Markdown, para você copiar para o seu repositório de treino:
+
+```markdown
+# Nome do projeto
+
+Uma frase: o que é e para quem.
+
+## O que faz
+
+## Como rodar
+
+## Como testar
+
+## Estrutura das pastas
+
+## Licença e como citar
+```
+
+O **CHANGELOG** não é para quem escreve o código, é para quem **usa**: conta, versão a versão, o que mudou (a @sec-ciclo mostra o formato). O **`.gitignore`** (@sec-git-ignore) lista o que não vai para a história. O arquivo **`CITATION.cff`** diz como citar o projeto, e o GitHub mostra isso na página do repositório.
+
+E a **licença**. Sem uma licença escrita, a regra padrão é "todos os direitos reservados": outras pessoas podem **ver** o repositório público, mas não têm permissão clara de **reutilizar** o conteúdo. Escolher uma licença é uma decisão de quem é autor (o site choosealicense.com ajuda a comparar). Este livro **ainda não escolheu**; a sugestão registrada é CC BY-NC-SA para o texto e MIT para o código. Este parágrafo não é aconselhamento jurídico: se o material nasce no seu trabalho ou instituição, confirme as regras de propriedade intelectual dela antes de escolher.
+
+## O seu ambiente de trabalho {#sec-s0-ambiente}
+
+### O terminal sem mistério {#sec-s0-terminal}
+
+O **terminal** é uma janela em que você digita uma linha de texto, aperta `Enter`, e o computador responde com texto. Não tem nada de mágico: cada comando é um programa com um nome (`git`, `python`, `ls`), seguido de **argumentos** (o que fazer, sobre o quê). No Windows você tem dois terminais úteis: o **PowerShell** (já vem com o Windows) e o **Git Bash** (vem com o Git). Escolha **um** e fique com ele durante o módulo. A recomendação é usar o **terminal integrado do editor** (a próxima seção), que abre na pasta certa e pode usar qualquer um dos dois.
+
+Três hábitos que valem ouro: `Tab` completa nomes de arquivo e de pasta; a seta para cima repete o comando anterior; `Ctrl+C` interrompe um comando que travou. E um aviso: se a tela parar mostrando `:` ou `(END)` no rodapé, o Git abriu um **paginador** (para mostrar uma saída longa): aperte `q` para sair, porque `Ctrl+C` não resolve. Os comandos de navegação, que servem nos dois terminais:
+
+| Quero... | Git Bash, macOS, Linux | PowerShell |
+|:--|:--|:--|
+| saber em que pasta estou | `pwd` | `pwd` (apelido de `Get-Location`) |
+| listar os arquivos | `ls` (`ls -a` mostra os ocultos) | `ls` (`ls -Force` mostra os ocultos) |
+| entrar numa pasta | `cd nome` | `cd nome` |
+| subir uma pasta | `cd ..` | `cd ..` |
+| ir para a pasta pessoal | `cd ~` | `cd ~` |
+| criar uma pasta | `mkdir nome` | `mkdir nome` |
+| mostrar um arquivo | `cat arquivo` | `cat arquivo` (apelido de `Get-Content`; no Windows PowerShell 5.1, arquivos UTF-8 sem BOM saem com os acentos errados: use `cat -Encoding utf8 arquivo`, ou abra o arquivo no VS Code) |
+| limpar a tela | `clear` | `clear` |
+
+**Os comandos do Git e do Python são idênticos nos dois terminais.** O que muda é pequeno, mas é a causa de muito erro de quem copia comandos do livro (os blocos `bash` foram escritos para o Git Bash):
+
+| Assunto | Git Bash, macOS, Linux | PowerShell |
+|:--|:--|:--|
+| continuar um comando na linha de baixo | `\` no fim da linha | `` ` `` (acento grave, o mesmo caractere que o Markdown chama de crase) como **último** caractere da linha: um espaço depois dele quebra o comando |
+| encadear: o segundo só roda se o primeiro der certo | `cmd1 && cmd2` | no PowerShell 7 é igual; no **Windows PowerShell 5.1** (o que vem no Windows) `&&` **não existe**: use duas linhas |
+| separador de pastas | `/` | `\` (a maioria dos comandos também aceita `/`) |
+| ativar o ambiente virtual | `source .venv/Scripts/activate` (Git Bash); `source .venv/bin/activate` (macOS e Linux) | `.venv\Scripts\Activate.ps1` |
+
+Na dúvida, escreva o comando **numa linha só** e um comando por linha: funciona em qualquer terminal. Dois exemplos do mesmo comando em várias linhas:
+
+```bash
+git log --oneline \
+    --decorate \
+    -5
+```
+
+```powershell
+git log --oneline `
+    --decorate `
+    -5
+```
+
+No teclado ABNT2, o acento grave costuma ser a tecla do acento agudo com `Shift`, e é uma tecla *morta*: aperte-a e depois a barra de espaço para o caractere aparecer. Para saber qual versão do PowerShell você tem, rode `$PSVersionTable.PSVersion`.
+
+### Em qual pasta estou? {#sec-s0-pasta}
+
+A causa número 1 de comandos que "não funcionam" é estar **na pasta errada**. O Git só enxerga um repositório quando você está dentro dele (ou numa pasta dentro dele). Veja o que ele diz numa pasta qualquer:
+
+```{python}
+#| echo: false
+from geocodigo.laboratorio_git import Laboratorio
+
+lab = Laboratorio(identidade=True)
+lab.cd("pasta-qualquer")
+lab.git("status", ok=False)
+```
+
+A mensagem `fatal: not a git repository` não quer dizer que o Git está quebrado: quer dizer que **esta pasta** não é um repositório. Rode `pwd` e confira onde você está. Para **abrir o terminal já na pasta certa**:
+
+* **no VS Code** (o caminho mais seguro): menu *File → Open Folder* (*Arquivo → Abrir Pasta*) e escolha a pasta do projeto; depois *Terminal → New Terminal* (há atalhos, mas eles variam com o teclado; o menu serve sempre). O terminal abre na pasta aberta, e o prompt confirma. O painel *Source Control* (`Ctrl+Shift+G`) mostra, ao lado, o mesmo que `git status`. Na primeira vez que abrir uma pasta, o VS Code pergunta se você confia nos autores dos arquivos (*Workspace Trust*): para pastas suas ou do livro, pode confiar; para uma pasta baixada de origem desconhecida, não. O editor é gratuito (code.visualstudio.com; veja a @sec-instalar) e a extensão *Python*, da Microsoft, ajuda;
+* **no Explorador de Arquivos do Windows**: entre na pasta e digite `powershell` na barra de endereço.
+
+Evite abrir o PowerShell "como administrador": ele costuma começar em `C:\Windows\System32`, uma pasta do sistema onde você não deve criar nem apagar nada.
+
+**Obter o clone do livro** (uma vez só). Se você ainda não tem a pasta, ou se a montou pelo navegador, sem Git (então ela **não** é um repositório), clone:
+
+```bash
+cd ~/Documents                     # ou a pasta que você escolheu para os projetos
+git clone https://github.com/Kargean/geociencias-em-codigo.git
+cd geociencias-em-codigo
+git remote -v                      # mostra o endereço do GitHub (origin)
+```
+
+No Explorador de Arquivos, a pasta `Documents` aparece como "Documentos"; o nome real costuma ser `Documents`.
+
+**Onde guardar as suas pastas.** Sugestão de organização, com as duas pastas que o módulo usa (@sec-dois-repos):
+
+```text
+Documents\                      (ou outra pasta sua, como C:\projetos)
+├── geociencias-em-codigo\      o clone do livro: você LÊ e roda, não edita
+└── chuva-estacoes\             o seu repositório de treino (Semana 1): você edita
+```
+
+A regra de ouro: **o clone do livro é só de leitura.** Quem edita arquivos dele passa a ter mudanças que podem impedir a atualização (veja a @sec-s0-atualizar). O que você escreve fica no **seu** repositório. Um aviso: se a sua pasta "Documentos" é sincronizada pelo OneDrive (rode `pwd` e veja se o caminho tem a palavra `OneDrive`), considere guardar os repositórios fora dela. Programas de sincronização podem mexer nos arquivos enquanto o Git trabalha, e a pasta `.git` tem muitos arquivos pequenos. É uma recomendação comum, **que não foi testada** no seu computador.
+
+### Quatro maneiras de rodar os exemplos do livro {#sec-s0-rodar}
+
+"Rodar o exemplo" pode querer dizer coisas bem diferentes. Da mais simples à mais completa:
+
+| Nível | O que você faz | O que precisa estar instalado |
+|:--|:--|:--|
+| **A. Ler** | abre o livro publicado e lê código e resultados | só o navegador |
+| **B. Executar o projeto** | roda `projeto_chuva` no terminal: relatório, resumo, testes | Python 3.11 ou mais novo (nada além) |
+| **C. Executar o código de um capítulo** | roda todos os blocos de um `.qmd` na ordem, sem o Quarto | Python, mais `matplotlib` e `pyyaml` (e o Git, para o laboratório) |
+| **D. Renderizar o livro** | gera as páginas HTML no seu computador | Quarto, mais as dependências do `requirements.txt` |
+
+**Nível B** (já funciona no seu computador): dentro da pasta `projeto_chuva`,
+
+```bash
+python -m chuva resumo                       # mostra CDD, Rx5day e dias de chuva por estação
+python -m unittest discover -s tests         # roda os testes; o esperado termina em "OK"
+```
+
+**Nível C**, a partir da pasta do livro (de preferência num ambiente virtual, veja a próxima seção):
+
+```bash
+python -m pip install matplotlib pyyaml
+python tools/executar_codigo_qmd.py p0-00-semana0-alicerce.qmd --gabaritos
+```
+
+(A lista de dois pacotes vem dos `import` dos capítulos e do verificador; a instalação em si não foi testada num Windows.) O verificador executa os blocos na ordem e imprime a saída de cada bloco, com uma linha `ok` depois dele, ou o erro completo se algum falhar. Ele **não substitui** a renderização (não monta as páginas), mas prova que o código do capítulo roda, e guarda cada figura como PNG. Os testes do módulo usam o mesmo verificador: `python tests/test_modulo_p0.py`. **O laboratório de Git foi escrito e testado no Linux; no Windows ele ainda não foi executado** (o teste automático do Windows só roda o projeto de chuva). Se o nível C falhar aí, é um achado valioso: abra um issue com o erro completo (@sec-ajuda).
+
+**Nível D** exige o Quarto (quarto.org) e as dependências do livro. Depois de instalar o Quarto: `python -m pip install -r requirements.txt`, e então `quarto preview` abre o livro no navegador e o atualiza a cada arquivo salvo, e `quarto render` gera a pasta `_book/`. O Quarto acrescenta linhas ao `.gitignore` do projeto quando não as encontra; o `.gitignore` do livro já traz as que ele usa, para o `git status` do clone continuar limpo. **O nível D não foi testado num Windows**; se travar, abra um issue com a mensagem de erro completa (@sec-ajuda).
+
+**Como experimentar um bloco do livro** sem estragar nada: copie o bloco para um arquivo seu (por exemplo, `experimento.py`, dentro do **seu** repositório), rode com `python experimento.py` e mude **um valor por vez**, prevendo o resultado antes de rodar. Isso funciona para blocos que só usam Python (como o da função `volume_de_chuva_m3`); os que leem arquivos do livro (`projeto_chuva/...`, `.github/...`) ou usam o laboratório precisam ser rodados a partir da pasta do livro. No VS Code, selecionar linhas e apertar `Shift+Enter` as executa no terminal do Python.
+
+### E o SQL? Onde rodar as consultas {#sec-s0-sql}
+
+No curso, **SQL é alicerce do mesmo tamanho que Python**: ele tem módulos próprios (P1-06 a P1-08, logo depois do pandas), é aprofundado no P3-01 e no P3-02 e é o coração do aplicativo com banco de dados do P3-12. Aqui vai só o mapa mínimo, para você saber o que é e onde rodar. A Semana 4 deste módulo dá uma primeira volta aplicada.
+
+**O que é.** Um banco de dados relacional guarda dados em **tabelas**. Cada **linha** é um registro (uma medição) e cada **coluna** é um atributo (estação, dia, chuva em mm). **SQL** é a linguagem para perguntar e alterar: você descreve **o que** quer e o banco decide **como** buscar. O **SQLite** é um banco inteiro dentro de **um arquivo**, sem servidor para instalar, e já vem com o Python (módulo `sqlite3`). O que é um servidor de banco de dados, e por que existe, está na @sec-s0-servidor, logo depois desta seção.
+
+| Onde rodar SQL | Como | O que precisa | Testado para este capítulo? |
+|:--|:--|:--|:--|
+| **Dentro do Python** | `import sqlite3` e `banco.execute("SELECT ...")` | só o Python | **sim**, no Linux (o bloco abaixo e a Semana 4) |
+| **DB Browser for SQLite** | programa gratuito: abre um arquivo `.db`, mostra as tabelas e roda SQL numa janela | instalar o programa | não |
+| **Terminal** | `sqlite3 arquivo.db` abre um prompt de SQL | o programa `sqlite3`, que no Windows nem sempre vem instalado | não |
+| **VS Code** | extensões que abrem arquivos `.db` | instalar uma extensão | não |
+
+O caminho **dentro do Python** é o que o livro usa, porque ele roda igual em qualquer sistema e permite conferir cada resposta do SQL contra um cálculo em Python (regra do método). Um exemplo pequeno: seis medições de chuva em duas estações, **uma delas ausente** (`None` no Python, `NULL` no SQL).
+
+```{python}
+#| label: s0-sql
+#| code-fold: true
+#| code-summary: "Ver o código"
+import sqlite3
+
+medicoes = [  # (estação, dia, chuva em mm); None = medição que faltou
+    ("E01", "2024-01-01", 12.0),
+    ("E01", "2024-01-02", 0.0),
+    ("E01", "2024-01-03", 30.0),
+    ("E02", "2024-01-01", 5.0),
+    ("E02", "2024-01-02", None),
+    ("E02", "2024-01-03", 10.0),
+]
+banco = sqlite3.connect(":memory:")  # banco só na memória: some quando o programa termina
+banco.execute("CREATE TABLE chuva (estacao TEXT, dia TEXT, mm REAL)")
+banco.executemany("INSERT INTO chuva VALUES (?, ?, ?)", medicoes)
+
+consulta = """
+SELECT estacao, COUNT(mm) AS dias_medidos, ROUND(AVG(mm), 1) AS media_mm
+FROM chuva
+GROUP BY estacao
+ORDER BY estacao
+"""
+resultado_sql = banco.execute(consulta).fetchall()
+for linha in resultado_sql:
+    print(linha)
+
+# a mesma conta em Python puro, para conferir o SQL
+por_estacao = {}
+for estacao, _dia, mm in medicoes:
+    por_estacao.setdefault(estacao, []).append(mm)
+resultado_py = []
+for estacao in sorted(por_estacao):
+    medidos = [mm for mm in por_estacao[estacao] if mm is not None]
+    resultado_py.append((estacao, len(medidos), round(sum(medidos) / len(medidos), 1)))
+print("SQL e Python concordam:", resultado_sql == resultado_py)
+```
+
+Duas coisas para notar. A estação E02 tem **três** linhas, mas `COUNT(mm)` contou **duas**, e a média saiu **7,5** e não 5,0: o SQL **ignora** o `NULL` em vez de tratá-lo como zero (tratar a medição que faltou como zero derrubaria a média). Esse é um dos motivos pelos quais o módulo P1-06 ensina `NULL` com cuidado.
+
+A segunda lição é de **segurança**: nunca monte uma consulta colando texto. O bloco abaixo procura uma estação cujo nome foi digitado de má-fé (`E01' OR '1'='1`) das duas maneiras:
+
+```{python}
+#| label: s0-sql-injecao
+#| code-fold: true
+#| code-summary: "Ver o código"
+nome = "E01' OR '1'='1"  # texto malicioso, como alguém poderia digitar num formulário
+
+colando = banco.execute(f"SELECT COUNT(*) FROM chuva WHERE estacao = '{nome}'").fetchone()[0]
+com_parametro = banco.execute("SELECT COUNT(*) FROM chuva WHERE estacao = ?", (nome,)).fetchone()[0]
+print("colando o texto:", colando, "linhas | com parâmetro (?):", com_parametro, "linhas")
+```
+
+Colando o texto, o `OR '1'='1'` virou parte da consulta e ela devolveu **todas** as seis linhas, para uma estação que não existe; com o parâmetro `?`, o texto é tratado só como texto e a resposta é **zero**. Isso se chama *injeção de SQL* e é um dos erros de segurança mais antigos e mais comuns. A regra, desde o primeiro dia: **valores entram por parâmetro (`?`), nunca por colagem de texto**.
+
+Por fim, um arquivo `.sql` (como o `projeto_chuva/sql/esquema.sql`) é só texto com comandos; o Python o executa de uma vez com `executescript`:
+
+```{python}
+#| label: s0-sql-arquivo
+#| code-fold: true
+#| code-summary: "Ver o código"
+from pathlib import Path
+
+esquema = Path("projeto_chuva/sql/esquema.sql").read_text(encoding="utf-8")
+banco_do_projeto = sqlite3.connect(":memory:")
+banco_do_projeto.executescript(esquema)
+tabelas = [linha[0] for linha in banco_do_projeto.execute(
+    "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")]
+print("tabelas criadas pelo esquema.sql:", tabelas)
+```
+
+**Limites.** Só o caminho "dentro do Python" foi executado, e no Linux; o DB Browser, o comando `sqlite3` e as extensões do VS Code **não foram testados**, e o bloco acima ainda não rodou no Windows (o teste automático do Windows só roda o projeto de chuva). Se algo falhar aí, abra um issue com a mensagem de erro completa (@sec-ajuda).
+
+### E o servidor? Banco em arquivo × banco em servidor {#sec-s0-servidor}
+
+Na seção anterior, o SQLite era "um banco dentro de um arquivo". Cedo ou tarde você vai ouvir outras palavras: *PostgreSQL*, *servidor de banco de dados*, *host*, *porta*, *usuário e senha*. Elas descrevem **outra maneira** de guardar dados, e entendê-la agora evita muita confusão depois (a Parte P3 inteira usa isso). O caminho é: uma analogia, um vocabulário, **um servidor de brinquedo que roda de verdade** (cabe numa tela de Python) e, só então, o registro de uma sessão com um servidor real.
+
+**Duas maneiras de guardar os mesmos dados.** Pense em como uma equipe guarda as medições de chuva.
+
+* **Banco em arquivo (SQLite) = caderno de campo.** O caderno está na sua mochila: você abre, lê, escreve e fecha, sem pedir nada a ninguém e sem internet. Mas, se duas pessoas tentarem escrever **na mesma página ao mesmo tempo**, dá confusão; e um caderno deixado numa pasta compartilhada da rede pode ser estragado.
+* **Banco em servidor (PostgreSQL) = secretaria do laboratório.** Os registros ficam numa sala trancada, que só a atendente abre. Você vai ao balcão, mostra o crachá (usuário e senha), faz o **pedido** ("qual é a média de chuva da estação E01?") e a atendente consulta os arquivos e entrega a **resposta**. Muita gente é atendida ao mesmo tempo, a atendente decide quem pode só consultar e quem pode alterar, e a sala trancada pode ficar em **outro prédio** (outro computador).
+
+```text
+  BANCO EM ARQUIVO (SQLite)                 BANCO EM SERVIDOR (PostgreSQL)
+
+  seu programa ──abre e escreve──▶ .db      programa A ──┐
+  (o próprio programa mexe                  programa B ──┼──pedidos──▶ SERVIDOR ──▶ arquivos do banco
+   no arquivo)                              programa C ──┘  (pela rede)  (único que    (ninguém mais
+                                                                          os abre)       os abre)
+```
+
+**O vocabulário, com a analogia da secretaria.**
+
+| Termo | Em uma frase | Na analogia | Onde aparece |
+|:--|:--|:--|:--|
+| **Servidor** | programa que fica ligado, esperando pedidos | a atendente | o processo `postgres`; o `ServidorDeBrinquedo` abaixo |
+| **Cliente** | programa que faz o pedido | quem chega ao balcão | `psql`, o QGIS, um script Python; a função `pedir` abaixo |
+| **Host** | em qual máquina o servidor está | o endereço do prédio | `localhost` (ou `127.0.0.1`) significa "esta mesma máquina" |
+| **Porta** | qual "guichê" da máquina atende esse serviço (um número) | o número do guichê | o PostgreSQL usa a **5432**, se ninguém mudar |
+| **Usuário** (*role*, papel) e **senha** | quem você é e a prova disso | o crachá | `aluno`, `leitor` |
+| **Permissão** | o que cada usuário pode fazer | o que o crachá abre | `GRANT SELECT ON chuva TO leitor` |
+| **Conexão** | a conversa aberta entre cliente e servidor | o atendimento no balcão | uma conexão por cliente |
+| **Protocolo** | o "idioma" combinado para pedir e responder | a forma do formulário | no brinquedo, uma linha de JSON; no PostgreSQL, o protocolo próprio dele |
+
+Um endereço de banco costuma vir numa linha só, a *URI de conexão*, que reúne usuário, host, porta e nome do banco: `postgresql://aluno@localhost:5432/ambiental` (cada parte é opcional; veja a seção *Connection URIs* da documentação do PostgreSQL, em [postgresql.org/docs/16/libpq-connect.html](https://www.postgresql.org/docs/16/libpq-connect.html)). **Nunca** escreva a senha numa URI que vá para o GitHub.
+
+**Um servidor de brinquedo que funciona.** A melhor forma de entender um servidor é construir um mínimo. O código abaixo (regra do método: construir a ferramenta uma vez antes de usar a pronta) usa só a biblioteca padrão do Python e tem cinco peças:
+
+1. as **constantes** no topo (endereço, tempo limite, quem pode entrar e com qual permissão), nomeadas e comentadas, como pede a regra 6 do método;
+2. o `ServidorDeBrinquedo`, que fica ligado esperando, é o **único** a abrir o arquivo do banco e **confere o crachá** antes de qualquer coisa;
+3. um `Atendente` por cliente, num fio de execução (*thread*) próprio: por isso vários clientes são atendidos ao mesmo tempo; as escritas, porém, passam por uma **fila** (`fila_de_escrita`), uma de cada vez;
+4. para o usuário de leitura, o arquivo é aberto em modo **somente leitura** (`mode=ro`): o próprio SQLite recusa qualquer escrita;
+5. a função `pedir`, que é o **cliente**: conecta, envia o pedido (uma linha de JSON) e lê a resposta.
+
+**Convenções deste bloco.** Endereço `127.0.0.1` (só esta máquina); porta escolhida pelo sistema operacional (pedir a porta `0` significa "me dê uma livre"); cada pedido e cada resposta são **uma linha de JSON**; chuva em mm.
+
+```{python}
+#| label: s0-servidor-codigo
+#| code-fold: true
+#| code-summary: "Ver o código do servidor e do cliente (cerca de 85 linhas)"
+import json
+import socket
+import socketserver
+import sqlite3
+import tempfile
+import threading
+from contextlib import closing, nullcontext
+from pathlib import Path
+
+ENDERECO = "127.0.0.1"             # "esta máquina": só programas daqui conseguem conectar
+PORTA_ESCOLHIDA_PELO_SISTEMA = 0   # 0 = o sistema operacional escolhe uma porta livre
+TEMPO_LIMITE_S = 5                 # ninguém espera para sempre (cliente lento ou travado)
+USUARIOS = {                       # usuário: (senha, permissão). Senhas de BRINQUEDO.
+    "aluno": ("brinquedo-1", "escrita"),
+    "leitor": ("brinquedo-2", "leitura"),
+}
+
+
+def _sem_attach(acao, *_resto):
+    """Recusa ATTACH, que deixaria o cliente abrir outros arquivos da máquina."""
+    return sqlite3.SQLITE_DENY if acao == sqlite3.SQLITE_ATTACH else sqlite3.SQLITE_OK
+
+
+class Atendente(socketserver.StreamRequestHandler):
+    """Atende UM cliente: lê um pedido (uma linha de JSON) e devolve uma resposta."""
+
+    timeout = TEMPO_LIMITE_S
+
+    def handle(self):
+        try:
+            pedido = json.loads(self.rfile.readline().decode("utf-8"))
+            resposta = self.server.responder(pedido)
+        except (ValueError, AttributeError, OSError):
+            resposta = {"ok": False, "erro": "pedido inválido"}
+        self.wfile.write((json.dumps(resposta) + "\n").encode("utf-8"))
+
+
+class ServidorDeBrinquedo(socketserver.ThreadingTCPServer):
+    """Só ele abre o arquivo do banco; os clientes falam com ele pela rede."""
+
+    daemon_threads = True
+
+    def __init__(self, arquivo_do_banco):
+        super().__init__((ENDERECO, PORTA_ESCOLHIDA_PELO_SISTEMA), Atendente)
+        self.arquivo = Path(arquivo_do_banco)
+        self.fila_de_escrita = threading.Lock()  # uma escrita de cada vez
+
+    def responder(self, pedido):
+        usuario = pedido.get("usuario")
+        if usuario not in USUARIOS or USUARIOS[usuario][0] != pedido.get("senha"):
+            return {"ok": False, "erro": "autenticação falhou"}
+        somente_leitura = USUARIOS[usuario][1] == "leitura"
+        trava = nullcontext() if somente_leitura else self.fila_de_escrita
+        try:
+            with trava:
+                if somente_leitura:  # o próprio SQLite barra qualquer escrita
+                    conexao = sqlite3.connect(self.arquivo.as_uri() + "?mode=ro",
+                                              uri=True, timeout=TEMPO_LIMITE_S)
+                else:
+                    conexao = sqlite3.connect(self.arquivo, timeout=TEMPO_LIMITE_S)
+                with closing(conexao):
+                    conexao.set_authorizer(_sem_attach)
+                    cursor = conexao.execute(pedido["sql"], pedido.get("params", []))
+                    linhas = cursor.fetchall()
+                    conexao.commit()
+                    colunas = [c[0] for c in cursor.description] if cursor.description else []
+            return {"ok": True, "colunas": colunas, "linhas": linhas}
+        except (sqlite3.Error, KeyError) as erro:
+            return {"ok": False, "erro": str(erro)}
+
+
+def iniciar(arquivo_do_banco):
+    """Liga o servidor num fio paralelo e devolve (servidor, porta)."""
+    servidor = ServidorDeBrinquedo(arquivo_do_banco)
+    threading.Thread(target=servidor.serve_forever, daemon=True).start()
+    return servidor, servidor.server_address[1]
+
+
+def pedir(porta, usuario, senha, sql, params=()):
+    """O CLIENTE: abre uma conexão, envia um pedido e lê a resposta."""
+    pedido = {"usuario": usuario, "senha": senha, "sql": sql, "params": list(params)}
+    with socket.create_connection((ENDERECO, porta), timeout=TEMPO_LIMITE_S) as ligacao:
+        ligacao.sendall((json.dumps(pedido) + "\n").encode("utf-8"))
+        with ligacao.makefile("r", encoding="utf-8") as resposta:
+            return json.loads(resposta.readline())
+```
+
+Agora o uso, em seis passos. O bloco reaproveita `medicoes`, `consulta` e `resultado_sql` da seção anterior e usa uma **pasta temporária** para o arquivo do banco (ela some no fim).
+
+```{python}
+#| label: s0-servidor-uso
+#| code-fold: true
+#| code-summary: "Ver o código"
+pasta_temporaria = tempfile.TemporaryDirectory()
+arquivo_do_banco = Path(pasta_temporaria.name) / "ambiental.db"
+servidor, porta = iniciar(arquivo_do_banco)  # 1) liga o servidor
+print("servidor ligado em", ENDERECO, "(a porta muda a cada execução)")
+
+aluno = ("aluno", "brinquedo-1")    # crachás: (usuário, senha)
+leitor = ("leitor", "brinquedo-2")
+
+# 2) o aluno cria a tabela e grava as seis medições da seção anterior
+pedir(porta, *aluno, "CREATE TABLE chuva (estacao TEXT, dia TEXT, mm REAL)")
+for linha in medicoes:
+    pedir(porta, *aluno, "INSERT INTO chuva VALUES (?, ?, ?)", linha)
+
+# 3) a MESMA consulta da seção anterior, agora por meio do servidor
+medias = pedir(porta, *aluno, consulta)["linhas"]
+print(medias)
+print("servidor e SQL local concordam:", medias == [list(l) for l in resultado_sql])
+
+# 4) o leitor pode consultar, mas não escrever; senha errada nem entra
+leitura_do_leitor = pedir(porta, *leitor, "SELECT COUNT(*) FROM chuva")["linhas"][0][0]
+tentativa_do_leitor = pedir(porta, *leitor, "INSERT INTO chuva VALUES ('E03', '2024-01-01', 3.0)")
+senha_errada = pedir(porta, "aluno", "errada", "SELECT 1")
+print("leitor consulta:", leitura_do_leitor, "linhas")
+print("leitor tenta gravar:", tentativa_do_leitor["erro"])
+print("senha errada:", senha_errada["erro"])
+
+# 5) quatro clientes gravando ao mesmo tempo: a fila do servidor organiza
+def registrar(dia):
+    pedir(porta, *aluno, "INSERT INTO chuva VALUES (?, ?, ?)", ("E03", f"2024-01-0{dia}", float(dia)))
+
+fios = [threading.Thread(target=registrar, args=(dia,)) for dia in range(1, 5)]
+for fio in fios:
+    fio.start()
+for fio in fios:
+    fio.join()
+total_de_linhas = pedir(porta, *aluno, "SELECT COUNT(*) FROM chuva")["linhas"][0][0]
+print("depois de 4 clientes ao mesmo tempo:", total_de_linhas, "linhas (6 + 4)")
+
+# 6) desliga o servidor: quem tentar falar com ele agora é recusado
+servidor.shutdown()
+servidor.server_close()
+try:
+    pedir(porta, *aluno, "SELECT 1")
+except OSError as erro:
+    nome_do_erro = type(erro).__name__
+    print("servidor desligado:", nome_do_erro)
+pasta_temporaria.cleanup()
+```
+
+**Como ler a saída.** (1) Pela rede, a consulta devolveu a mesma resposta do SQLite direto (E01 14,0 e E02 7,5, com o `NULL` ignorado): o servidor não muda o SQL, muda **quem** executa e **de onde** se pede. (2) O leitor consegue consultar, mas a gravação é recusada com `attempt to write a readonly database`: foi o servidor que decidiu isso, não o cliente. (3) Com a senha errada, a mensagem é só `autenticação falhou`, e o pedido nem chega a ser executado. (4) Quatro clientes gravaram ao mesmo tempo e nenhuma linha se perdeu, porque o servidor serializou as escritas. (5) Depois do desligamento, o cliente recebe **conexão recusada** (no Linux, `ConnectionRefusedError`): ninguém está atendendo naquele endereço. É o erro mais comum de quem começa com servidores, e quase nunca é problema no banco.
+
+::: {.callout-warning}
+## Este servidor é de brinquedo: não o exponha à rede
+Ele serve para entender a ideia, e **só** isso. Deliberadamente, ele:
+
+* escuta só em `127.0.0.1`; **nunca** troque por `0.0.0.0` ou pelo IP da rede: qualquer um conseguiria falar com ele;
+* trafega a senha **em texto puro**, sem criptografia, e a guarda no código-fonte; senha de verdade fica fora do repositório (variável de ambiente ou arquivo ignorado pelo Git) e **nunca** vai para o GitHub;
+* não limita tentativas de senha, não registra quem fez o quê e executa **qualquer SQL** de quem tem senha (por isso o `_sem_attach`, que fecha só uma das portas perigosas).
+
+Servidores de verdade resolvem isso: o PostgreSQL guarda senhas embaralhadas (a instalação de teste usada abaixo mostrou `scram-sha-256` como método), aceita conexões cifradas (TLS), tem permissões por tabela e pode registrar os acessos. Só o método da senha foi conferido na instalação de teste; os demais recursos são os descritos na documentação. **Não foi testado** num Windows: espera-se que não apareça aviso de firewall, porque só escutamos nesta máquina; **se aparecer, negue** o acesso a redes e abra um issue (@sec-ajuda).
+:::
+
+**Banco em arquivo × banco em servidor, lado a lado.**
+
+| | SQLite (arquivo) | PostgreSQL (servidor) |
+|:--|:--|:--|
+| Onde estão os dados | num arquivo `.db` que o seu programa abre | em pastas que **só o servidor** abre |
+| O que precisa estar rodando | nada: é uma biblioteca dentro do programa | um processo servidor, ligado |
+| Instalação | já vem com o Python | instalar e configurar (usuários, senhas, porta) |
+| Quem entra | quem consegue abrir o arquivo | quem tem usuário, senha e permissão |
+| Vários ao mesmo tempo | leitores ilimitados, mas **um escritor por vez** | feito para muitos clientes ao mesmo tempo |
+| Pela rede | **não** é indicado abrir o arquivo numa pasta de rede (o travamento de arquivos falha em muitas implementações e pode corromper o banco) | é o uso normal: o cliente fala com o servidor |
+| Permissões finas (por tabela) | não | sim (`GRANT`) |
+| Dialeto do SQL | o do SQLite | o do PostgreSQL: parecido, **com diferenças** (veja abaixo) |
+| Bom para | estudo, protótipo, programa de um usuário só, troca de arquivos | sistemas compartilhados, aplicativos web e APIs, dados espaciais com PostGIS |
+
+As linhas sobre o SQLite vêm da página *Appropriate Uses For SQLite* ([sqlite.org/whentouse.html](https://www.sqlite.org/whentouse.html), consultada em 08/10/2026): "SQLite supports an unlimited number of simultaneous readers, but it will only allow one writer at any instant in time"; "If there are many client programs sending SQL to the same database over a network, then use a client/server database engine instead of SQLite"; e "file locking logic is buggy in many network filesystem implementations", o que pode causar corrupção. Uma curiosidade ligada à geotecnologia: o **GeoPackage**, formato aberto de dados geoespaciais, é, por dentro, um arquivo SQLite. As linhas sobre o PostgreSQL vêm da documentação (versão 16) e da sessão registrada abaixo.
+
+**Um servidor de verdade: o registro de uma sessão.** O que segue é o registro de uma sessão com o **PostgreSQL 16.15** num computador Linux, em 08/10/2026, usando o `psql`, o cliente de linha de comando do PostgreSQL. **O livro não executa este bloco**: não há PostgreSQL no verificador. É uma cópia do que o servidor devolveu, executada uma vez; as senhas eram de teste e foram omitidas. Foram editados só o formato (o prompt `ambiental=>` foi acrescentado antes de cada comando e o pedido de senha foi omitido). Primeiro, o que o **administrador** do servidor digitou, uma vez, para preparar tudo (`<...>` marca o lugar das senhas):
+
+```sql
+-- como administrador (superusuário) do servidor
+CREATE ROLE aluno  LOGIN PASSWORD '<senha-do-aluno>';
+CREATE ROLE leitor LOGIN PASSWORD '<senha-do-leitor>';
+CREATE DATABASE ambiental OWNER aluno;
+
+-- depois, conectado ao banco ambiental como aluno
+CREATE TABLE chuva (estacao text, dia date, mm real);
+INSERT INTO chuva VALUES
+  ('E01', '2024-01-01', 12), ('E01', '2024-01-02', 0), ('E01', '2024-01-03', 30),
+  ('E02', '2024-01-01', 5),  ('E02', '2024-01-02', NULL), ('E02', '2024-01-03', 10);
+GRANT SELECT ON chuva TO leitor;   -- o leitor só pode consultar
+```
+
+Em seguida, a sessão dos clientes:
+
+```text
+$ psql "postgresql://aluno@localhost:5432/ambiental"
+ambiental=> SELECT current_user, inet_server_port();
+ current_user | inet_server_port 
+--------------+------------------
+ aluno        |             5432
+(1 row)
+
+ambiental=> SELECT estacao, COUNT(mm) AS dias_medidos, ROUND(AVG(mm), 1) AS media_mm FROM chuva GROUP BY estacao ORDER BY estacao;
+ERROR:  function round(double precision, integer) does not exist
+LINE 1: SELECT estacao, COUNT(mm) AS dias_medidos, ROUND(AVG(mm), 1)...
+                                                   ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+
+ambiental=> SELECT estacao, COUNT(mm) AS dias_medidos, ROUND(AVG(mm)::numeric, 1) AS media_mm FROM chuva GROUP BY estacao ORDER BY estacao;
+ estacao | dias_medidos | media_mm 
+---------+--------------+----------
+ E01     |            3 |     14.0
+ E02     |            2 |      7.5
+(2 rows)
+
+$ psql "postgresql://leitor@localhost:5432/ambiental"
+ambiental=> SELECT COUNT(*) FROM chuva;
+ count 
+-------
+     6
+(1 row)
+
+ambiental=> INSERT INTO chuva VALUES ('E03', '2024-01-01', 3);
+ERROR:  permission denied for table chuva
+
+$ psql "postgresql://aluno@localhost:5432/ambiental"      (com a senha errada)
+psql: error: connection to server at "localhost" (127.0.0.1), port 5432 failed: FATAL:  password authentication failed for user "aluno"
+connection to server at "localhost" (127.0.0.1), port 5432 failed: FATAL:  password authentication failed for user "aluno"
+
+$ psql "postgresql://aluno@localhost:5999/ambiental"      (porta onde ninguém atende)
+psql: error: connection to server at "localhost" (127.0.0.1), port 5999 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?
+```
+
+(A segunda linha do erro de senha repete a primeira: é assim que o `psql` a imprimiu.) O que observar, comparando com o brinquedo:
+
+* **A URI** `postgresql://aluno@localhost:5432/ambiental` é usuário, host, porta e banco; a porta 5432 é a padrão do PostgreSQL, e `inet_server_port()` confirma em qual porta o servidor atendeu.
+* **A mesma resposta:** 14,0 e 7,5, com o `NULL` ignorado, como no SQLite e no Python.
+* **`permission denied for table chuva`** é a versão de verdade do nosso `readonly`: aqui a barreira é o `GRANT`, e o leitor só recebeu `SELECT`.
+* **`password authentication failed`** (senha errada) e **`Connection refused`** (ninguém atende no host e porta pedidos) são os dois primeiros erros que você vai ver na vida. Eles se distinguem: no primeiro, o servidor **respondeu** e recusou o crachá; no segundo, **nem houve resposta**.
+
+::: {.callout-note}
+## SQL "padronizado" não é SQL igual
+O mesmo `ROUND(AVG(mm), 1)` que funcionou no SQLite **falhou** no PostgreSQL. O motivo, conforme a mensagem: `AVG` de uma coluna `real` devolve `double precision`, e o PostgreSQL só tem `ROUND(valor, casas)` para o tipo `numeric`. O conserto é converter: `AVG(mm)::numeric`. O SQLite é mais tolerante com tipos, e por isso o erro não apareceu antes. A lição: aprender SQL é aprender o **núcleo comum** e saber que cada banco tem **dialeto**. Quando um código passar de um banco para outro, rode os testes de novo; o módulo P1-06 vai apontar essas diferenças desde o começo.
+:::
+
+**Quando escolher cada um.**
+
+* **Só você, no seu computador, um programa por vez** (estudo, protótipo, análise): SQLite. É o caso da maior parte deste curso até o P3.
+* **Vários usuários ou programas ao mesmo tempo, ou acesso pela rede** (equipe, site, API): servidor.
+* **Dados espaciais com consultas geométricas pesadas**: PostgreSQL com a extensão PostGIS (Parte P3).
+* **Arquivo para entregar a um colega**: SQLite (ou GeoPackage), porque ele é um arquivo só.
+* **Dúvida?** Regra prática: comece em SQLite; o SQL que você aprende serve nos dois, e a troca para um servidor costuma ser decidida quando aparece o segundo usuário.
+
+**Onde isso volta no curso.** P1-06 a P1-08 ensinam SQL de forma sistemática em SQLite; o P3-01 aprofunda a modelagem, o P3-02 leva o SQL a dados espaciais (o PostgreSQL com PostGIS é o servidor que aparece na Parte P3), o P3-07 coloca uma **API** entre o usuário e o banco (a "atendente" de verdade de um aplicativo) e o P3-12 monta o aplicativo completo. Um programa Python conversa com um servidor PostgreSQL por meio de um pacote cliente (por exemplo, o `psycopg`), que faz o papel da nossa função `pedir`; o módulo `sqlite3`, da biblioteca padrão, só fala com arquivos SQLite.
+
+**Limites.** O servidor de brinquedo foi executado **só no Linux** (30 execuções seguidas, sem falha); **no Windows ainda não**: as dúvidas são o aviso de firewall, o nome do erro depois do desligamento e a remoção da pasta temporária. A sessão com o PostgreSQL é um **registro** (uma execução, em Linux), que o livro não repete; a instalação do PostgreSQL e do `psql` num Windows **não foi testada** e ainda não está escrita (virá no primeiro módulo da Parte P3 que o exigir).
+
+### O ambiente virtual {#sec-s0-venv}
+
+Cada projeto usa pacotes (bibliotecas) de versões específicas, e projetos diferentes podem pedir versões diferentes. Instalar tudo no Python do sistema mistura tudo e, cedo ou tarde, leva ao "funcionava ontem". O **ambiente virtual** (*venv*) é uma pasta (`.venv`) com um Python e um conjunto de pacotes **só deste projeto**. O arquivo `requirements.txt` é a receita: lista os pacotes que o projeto precisa.
+
+O módulo P0-00 usa só a biblioteca padrão e **não precisa** de ambiente virtual para rodar o projeto de chuva (nível B). Ele passa a valer a partir do nível C e de todos os módulos seguintes (NumPy, pandas, mapas). Criar e ativar, uma vez por projeto, dentro da pasta dele (aqui, a do livro, para o nível C):
+
+```bash
+python -m venv .venv                  # cria o ambiente (a pasta .venv)
+source .venv/Scripts/activate         # Git Bash no Windows. No macOS e no Linux: source .venv/bin/activate
+python -m pip install matplotlib pyyaml        # nível C. Para o nível D: python -m pip install -r requirements.txt
+```
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1            # PowerShell
+python -m pip install matplotlib pyyaml        # nível C. Para o nível D: python -m pip install -r requirements.txt
+```
+
+Cada projeto tem o **seu** `.venv`. No seu repositório de treino, só crie um quando ele tiver um `requirements.txt` próprio (o `-r requirements.txt` falha se o arquivo não existe na pasta atual).
+
+Quando está ativo, o prompt costuma ganhar o prefixo `(.venv)`; como o editor pode ativar o ambiente sem mudar o prompt, o teste que não engana é `python -c "import sys; print(sys.prefix)"`: o caminho impresso deve terminar em `.venv`. Para sair: `deactivate`. Se o PowerShell recusar a ativação com uma mensagem sobre a **execução de scripts estar desabilitada**, rode `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` (libera scripts locais só para o seu usuário) e responda `S` (sim) quando ele pedir confirmação: apertar só `Enter` equivale a não. Em computador de instituição, a TI pode controlar essa política; se não funcionar, rode o Python do ambiente direto, sem ativar (`.venv\Scripts\python.exe -m pip install ...`). **A ativação não foi testada num Windows**: os comandos vêm da documentação do módulo `venv` do Python.
+
+O ambiente virtual **não vai para o GitHub**: ele é grande, e quem clonar o projeto recria o seu com `requirements.txt`. Por isso o `.gitignore` do livro lista `.venv/`. (A partir do Python 3.13, o próprio `python -m venv` já deixa um `.gitignore` dentro do `.venv`; mesmo assim, liste `.venv/` no `.gitignore` do projeto: vale para outras versões e deixa a regra à vista.) Confira no laboratório, usando o `.gitignore` **real** do repositório:
+
+```{python}
+#| echo: false
+import venv
+
+projeto = Laboratorio(identidade=True)
+projeto.cd("meu-projeto")
+projeto.git("init")
+projeto.escrever(".gitignore", Path(".gitignore").read_text(encoding="utf-8"), mostrar=False)
+venv.create(projeto.cwd / ".venv", with_pip=False)
+print("# criamos o ambiente virtual com: python -m venv .venv")
+projeto.git("status --short")
+projeto.git("status --short --ignored")
+projeto.git("check-ignore -v .venv/pyvenv.cfg")
+```
+
+O `status` mostra só o `.gitignore` como novo: o `.venv/` existe (aparece como `!!` com `--ignored`), mas o Git o ignora, e o `check-ignore -v` diz **qual linha** de qual arquivo o ignorou.
+
+### A rotina de cada sessão de estudo {#sec-s0-rotina}
+
+Uma rotina curta evita quase todos os problemas deste capítulo. Veja-a no laboratório, num repositório de treino que já tem um commit no GitHub e que você clonou:
+
+```{python}
+#| echo: false
+url = lab.criar_github("seu-usuario", "chuva-estacoes")
+lab.cd("origem")
+lab.git("init", mostrar=False)
+lab.escrever("README.md", "# Chuva em estações\n", mostrar=False)
+lab.git("add README.md", mostrar=False)
+lab.git('commit -m "Cria README"', mostrar=False)
+lab.git(f"remote add origin {url}", mostrar=False)
+lab.git("push -u origin main", mostrar=False)
+lab.cd("")
+lab.git(f"clone {url} chuva-estacoes")
+lab.cd("chuva-estacoes")
+print("# --- começa a sessão de estudo ---")
+lab.git("status -sb")
+lab.git("pull")
+lab.escrever("README.md", "# Chuva em estações\n\nProjeto de estudo com dados sintéticos.\n")
+lab.git("status -sb")
+lab.git("diff")
+lab.git("add README.md")
+lab.git('commit -m "README: explica que os dados são sintéticos"')
+lab.git("status -sb")
+lab.git("push")
+lab.git("status -sb")
+```
+
+A rotina, em ordem:
+
+| Passo | Comando | O que esperar |
+|:--|:--|:--|
+| 1 | abrir a pasta no VS Code e o terminal integrado | o prompt mostra a pasta certa |
+| 2 | `git status -sb` | nenhuma linha de arquivo: o ponto de partida está limpo |
+| 3 | `git pull` | `Already up to date.` ou a lista do que chegou |
+| 4 | trabalhar: editar, **salvar**, rodar | |
+| 5 | rodar os testes | termina em `OK` |
+| 6 | `git status` e `git diff` | só o que você pretendia mudar |
+| 7 | `git add arquivo` e `git commit -m "..."` | a mensagem conta o que e por quê |
+| 8 | `git push` | o GitHub recebe os commits |
+| 9 | `git status -sb` | sem `ahead` nem `behind` |
+
+A primeira linha do `git status -sb` é um **painel de controle** do seu repositório em relação ao GitHub:
+
+| Cabeçalho | Significa | O que fazer |
+|:--|:--|:--|
+| `## main...origin/main` | igual ao GitHub (como o Git o viu da última vez) | nada |
+| `## main...origin/main [ahead 1]` | você tem 1 commit que o GitHub não tem | `git push` |
+| `## main...origin/main [behind 2]` | o GitHub tem 2 commits que você não tem | `git pull` |
+| `## main...origin/main [ahead 1, behind 2]` | os dois: as histórias divergiram | `git pull --no-rebase` primeiro (sem essa opção, o Git recente pode pedir que você escolha como juntar; veja a @sec-s3-dois), e pode haver conflito (@sec-s3-conflito) |
+| `## main` (sem `...origin/main`) | esta `main` ainda não está ligada a um remoto | `git push -u origin main` (Semana 1) |
+| `## No commits yet on main` | repositório novo, ainda sem nenhum commit | fazer o primeiro commit |
+
+Um detalhe que engana: o `git status` **não consulta a internet**. O `behind` só aparece depois de um `git fetch` ou `git pull`, que atualizam o que o Git sabe do GitHub. E repare no passo do meio da saída acima: depois do `commit`, o `status` mostrou `[ahead 1]`. **O commit grava no seu computador; quem envia é o `push`.**
+
+### Manter o clone do livro atualizado {#sec-s0-atualizar}
+
+O livro vai mudar: correções, capítulos novos, versões. Para receber as mudanças, entre na pasta do clone e rode `git pull`. Funciona **desde que você não tenha editado nenhum arquivo** do clone. Veja o que acontece se tiver (aqui o laboratório finge que o livro está em `Kargean/geociencias-em-codigo`):
+
+```{python}
+#| echo: false
+livro = Laboratorio(identidade=True)
+url_livro = livro.criar_github("Kargean", "geociencias-em-codigo")
+livro.cd("origem")
+livro.git("init", mostrar=False)
+livro.escrever("README.md", "# Geociências em Código\n", mostrar=False)
+livro.git("add README.md", mostrar=False)
+livro.git('commit -m "Cria README"', mostrar=False)
+livro.git(f"remote add origin {url_livro}", mostrar=False)
+livro.git("push -u origin main", mostrar=False)
+livro.cd("")
+livro.git(f"clone {url_livro} geociencias-em-codigo", mostrar=False)
+livro.cd("origem")
+livro.escrever("README.md", "# Geociências em Código\n\nUm livro-laboratório.\n", mostrar=False)
+livro.git('commit -am "README: acrescenta a descrição"', mostrar=False)
+livro.git("push", mostrar=False)
+print("# (o autor atualizou o livro no GitHub)")
+livro.cd("geociencias-em-codigo")
+livro.escrever("README.md", "# Anotei aqui por engano\n")
+livro.git("status -sb")
+livro.git("pull", ok=False)
+```
+
+O Git **se recusa** a trazer a novidade porque ela sobrescreveria a sua edição, e avisa: *"commit your changes or stash them before you merge"*. Repare que a linha *Updating ...* aparece depois do erro: a ordem das linhas pode variar. O que importa é o bloco que começa em `error:` e termina em `Aborting`. As saídas, conforme o que você quer:
+
+* **a edição foi um acidente** (o caso comum): veja o que será perdido com `git diff arquivo`, descarte-a com `git restore arquivo` (**sem volta**: a edição não está em nenhum commit) e rode `git pull` de novo;
+* **você quer guardar a edição**: copie o arquivo para o **seu** repositório antes, e então `git restore`;
+* **`git stash`** guarda a edição numa gaveta e depois a devolve; funciona quando as mudanças não se chocam, mas aqui as duas edições se tocam (a sua trocou a primeira linha; a do autor acrescentou linhas logo depois) e a devolução geraria um **conflito** (@sec-s3-conflito). Para o clone do livro, a primeira saída é a segura.
+
+```{python}
+#| echo: false
+livro.git("restore README.md")
+livro.git("pull")
+livro.git("status -sb")
+```
+
+Cada vez que a sessão de estudo começa com `git status -sb` limpo e `git pull`, esse problema não aparece.
+
+## Erros clássicos {#sec-s0-erros}
+
+1. **Terminal na pasta errada.** `fatal: not a git repository`, ou um arquivo que "não existe". Rode `pwd` e abra o terminal pelo VS Code.
+2. **Trabalhar em `C:\Windows\System32`.** Pode acontecer ao abrir o PowerShell como administrador. Feche e abra um terminal normal na pasta do projeto.
+3. **Achar que `commit` envia ao GitHub.** O commit é local; o `push` envia. Confira com `git status -sb`: `ahead` quer dizer que falta enviar.
+4. **Não salvar o arquivo no editor.** O Git só enxerga o que está **no disco**. No VS Code, um ponto no lugar do `x` na aba indica "não salvo".
+5. **Editar o clone do livro.** Depois o `git pull` é recusado. Edite só o seu repositório; se foi acidente, `git restore`.
+6. **Copiar comando de Bash no PowerShell sem traduzir:** `\` no fim da linha, `&&`, `source ...`. Veja a tabela da @sec-s0-terminal.
+7. **Instalar pacotes sem o ambiente virtual ativo.** Falta o `(.venv)` no prompt (ou o `sys.prefix` não termina em `.venv`), o pacote vai para o Python do sistema, e "funciona aqui, não funciona lá".
+8. **Comentário que repete o código, ou que mente.** Explique o porquê; se o código mudou, mude o comentário no mesmo commit.
+9. **Nome de arquivo com espaço, acento ou `final_v2`.** Quebra scripts e vira bagunça. A versão mora no Git.
+10. **README que não diz como rodar nem como testar.** Quem chega ao repositório (inclusive você, daqui a um ano) não sabe por onde começar.
+11. **Colar um segredo ao pedir ajuda.** Terminais copiados às vezes têm um *token* ou uma senha na saída. Releia antes de colar num issue, que é **público** em repositório público (@sec-s1-erros, item 6).
+12. **Pasta de projetos dentro do OneDrive.** Sincronizadores e Git não combinam bem; prefira uma pasta fora dele (recomendação comum, não testada aqui).
+13. **Culpar o banco quando é o servidor.** `Connection refused` quase sempre quer dizer que o servidor não está ligado, ou que host e porta estão errados; `password authentication failed` é senha ou usuário. Confira nesta ordem: o servidor está rodando? host e porta certos? usuário e senha certos? o usuário tem permissão? (@sec-s0-servidor)
+14. **Abrir o mesmo arquivo SQLite, ao mesmo tempo, em pasta de rede ou de nuvem compartilhada.** O travamento de arquivos falha em muitas implementações de rede e o banco pode corromper (sqlite.org). Vários usuários pedem um servidor.
+
+## Exercícios {#sec-s0-exercicios}
+
+Os gabaritos rodam no laboratório do livro e no Python, **a partir da pasta do livro** (alguns leem `projeto_chuva/` e `.github/`). Os exercícios 3 a 6 e o desafio usam um pouco mais de Python (funções, texto, expressões regulares): se ainda não se sente à vontade, faça o 1 e o 2 agora e volte a eles depois da Semana 2.
+
+**Exercício 1 (o passeio).** Responda às cinco perguntas do quadro *Faça agora* da @sec-s0-passeio, olhando o site.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 1
+Respostas lidas do site em 08/10/2026, pela API do GitHub. Elas descrevem o passado, mas o site é editável (um título pode ser alterado) e o ramo foi apagado depois do merge: vale o que o site mostrar para você hoje. Não dá para conferi-las sem internet:
+
+1. título do issue 4: *Teste falha no Windows: conexão com o banco fica aberta (WinError 32)*;
+2. ramo do PR 5: `fix/fechar-conexao-windows` (apagado depois do merge, mas o nome continua no cabeçalho do PR), com **3 commits** e **7 arquivos** alterados;
+3. primeira linha da descrição do PR 5: `Closes #4`, a palavra-chave que fechou o issue 4 ao juntar o PR;
+4. o ícone **verde** (✓) é "tudo certo", o **vermelho** (✗) é "falhou", o **amarelo** é "rodando" e o **cinza** é "cancelado" ou "pulado". Uma execução de "Publicar livro" aparece como cancelada quando chega um `push` mais novo: o arquivo tem `cancel-in-progress: true`;
+5. a seção "Licença" do `README.md` do livro diz que a licença está **por definir**.
+
+O código confere, nos arquivos do repositório, o que sustenta essas respostas (o conserto no `CHANGELOG`, o Windows no fluxo de testes, o cancelamento, a licença):
+
+```python
+import yaml
+from pathlib import Path
+
+assert "WinError 32" in Path("CHANGELOG.md").read_text(encoding="utf-8")          # o conserto ficou registrado
+assert "Closes #" in Path(".github/pull_request_template.md").read_text(encoding="utf-8")
+testes = yaml.safe_load(Path(".github/workflows/testes.yml").read_text(encoding="utf-8"))
+assert {"os": "windows-latest", "python": "3.13"} in testes["jobs"]["testes"]["strategy"]["matrix"]["include"]
+publicar = yaml.safe_load(Path(".github/workflows/publicar.yml").read_text(encoding="utf-8"))
+assert publicar["concurrency"]["cancel-in-progress"] is True
+licenca = Path("README.md").read_text(encoding="utf-8").split("## Licença")[1].strip().splitlines()[0]
+print(licenca)
+assert licenca.startswith("A definir")
+```
+:::
+
+**Exercício 2 (preveja, depois confira).** Você editou `a.txt`, rodou `git commit -am "dois"` e **não** rodou `git push`. Sem executar nada, diga: (a) o que mostra a primeira linha de `git status -sb`; (b) se o GitHub já tem o seu commit.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 2
+```python
+from geocodigo.laboratorio_git import Laboratorio
+
+lab_e2 = Laboratorio(identidade=True)
+url_e2 = lab_e2.criar_github("seu-usuario", "e2")
+lab_e2.cd("e2")
+lab_e2.git("init", mostrar=False)
+lab_e2.escrever("a.txt", "um\n", mostrar=False)
+lab_e2.git("add a.txt", mostrar=False); lab_e2.git('commit -m "a"', mostrar=False)
+lab_e2.git(f"remote add origin {url_e2}", mostrar=False)
+lab_e2.git("push -u origin main", mostrar=False)
+lab_e2.escrever("a.txt", "um\ndois\n", mostrar=False)
+lab_e2.git('commit -am "dois"', mostrar=False)
+cabecalho = lab_e2.git("status -sb", mostrar=False).splitlines()[0]
+print(cabecalho)
+assert cabecalho == "## main...origin/main [ahead 1]"
+local = lab_e2.git("rev-parse HEAD", mostrar=False)
+remoto = lab_e2.git("ls-remote origin main", mostrar=False).split()[0]
+assert local != remoto                      # o GitHub NÃO tem o commit
+lab_e2.git("push", mostrar=False)
+assert lab_e2.git("rev-parse HEAD", mostrar=False) == lab_e2.git("ls-remote origin main", mostrar=False).split()[0]
+```
+Resultado: `## main...origin/main [ahead 1]`. O commit existe só no seu computador: o hash local e o do GitHub (`ls-remote`) são diferentes até o `push`; depois dele, são iguais.
+:::
+
+**Exercício 3 (documente com um exemplo que o computador executa).** Escreva a docstring de `mm_para_litros(chuva_mm, area_m2)`: uma frase, a conta explicada e um exemplo `>>>`. Use `conferir_docstring` (@sec-s0-docstrings) para provar que o exemplo passa. Depois estrague o número esperado e veja o teste falhar.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 3
+```python
+def mm_para_litros(chuva_mm, area_m2):
+    """Litros de água de uma chuva sobre uma área.
+
+    1 mm de chuva sobre 1 m² é 1 litro; logo, litros = mm × m².
+
+    >>> mm_para_litros(10, 3)
+    30
+    """
+    return chuva_mm * area_m2
+
+
+assert conferir_docstring(mm_para_litros) == (0, 1)            # nenhuma falha, um exemplo
+
+def mm_para_litros_errada(chuva_mm, area_m2):
+    """Promete o número errado.
+
+    >>> mm_para_litros_errada(10, 3)
+    300
+    """
+    return chuva_mm * area_m2
+
+assert conferir_docstring(mm_para_litros_errada) == (1, 1)     # uma falha, um exemplo
+```
+Resultado: a docstring certa passa (0 falhas em 1 exemplo); a que promete 300 falha, e o `doctest` mostra *Expected: 300* e *Got: 30*. É a vantagem de documentar com exemplo executável.
+:::
+
+**Exercício 4 (organize).** Escreva `nome_seguro(nome)`, que transforma um nome de arquivo em minúsculas, sem acento nem espaço, com `_` entre as palavras, **preservando a extensão**. Teste com `Relatório FINAL (v2).docx`, `dados chuva (1).csv` e `Mapa Geológico - Versão 3.PNG`.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 4
+```python
+import re
+import unicodedata
+
+
+def nome_seguro(nome):
+    base, ponto, extensao = nome.rpartition(".")
+    if not ponto:                                    # nome sem extensão
+        base, extensao = nome, ""
+
+    def limpar(texto):
+        sem_acento = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+        return re.sub(r"[^a-z0-9]+", "_", sem_acento.lower()).strip("_")
+
+    return limpar(base) + ("." + limpar(extensao) if extensao else "")
+
+
+casos = {
+    "Relatório FINAL (v2).docx": "relatorio_final_v2.docx",
+    "dados chuva (1).csv": "dados_chuva_1.csv",
+    "Mapa Geológico - Versão 3.PNG": "mapa_geologico_versao_3.png",
+    "LEIAME": "leiame",
+}
+for antes, depois in casos.items():
+    print(f"{antes:32} -> {nome_seguro(antes)}")
+    assert nome_seguro(antes) == depois
+    assert nome_seguro(depois) == depois             # idempotente: aplicar de novo não muda nada
+```
+Resultado: os quatro nomes viram nomes seguros, e aplicar a função duas vezes dá o mesmo resultado. Limites: com mais de um ponto (`a.tar.gz`), só o último vira extensão; e o hífen também vira `_` (`2026-10-08` vira `2026_10_08`), então deixar o hífen passar quando está entre dígitos é um bom refinamento para você tentar. A ideia, `normalize("NFKD")` separa a letra do acento, e o `encode("ascii", "ignore")` descarta o acento.
+:::
+
+**Exercício 5 (o README responde às cinco perguntas?).** Escreva `perguntas_sem_resposta(texto)`, que olha os **títulos** de um README e devolve as perguntas da @sec-s0-readme sem um título que a responda. Aplique-a ao README do projeto de chuva e ao esqueleto da @sec-s0-readme.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 5
+```python
+from pathlib import Path
+
+PERGUNTAS = {
+    "O que é?": ("o que",),
+    "Como rodo?": ("como rodar", "instal", "usar"),
+    "Como testo?": ("testar", "testes"),
+    "Onde fica cada coisa?": ("pastas", "estrutura", "mapa"),
+    "Posso usar? Como cito?": ("licença", "licenca", "citar", "citação"),
+}
+
+
+def perguntas_sem_resposta(texto_readme):
+    titulos = [l.lstrip("#").strip().lower() for l in texto_readme.splitlines() if l.startswith("#")]
+    return [p for p, palavras in PERGUNTAS.items() if not any(palavra in t for t in titulos for palavra in palavras)]
+
+
+do_projeto = Path("projeto_chuva/README.md").read_text(encoding="utf-8")
+print(perguntas_sem_resposta(do_projeto))
+assert perguntas_sem_resposta(do_projeto) == ["Como testo?", "Posso usar? Como cito?"]
+
+esqueleto = "# Nome\n\n## O que faz\n\n## Como rodar\n\n## Como testar\n\n## Estrutura das pastas\n\n## Licença e como citar\n"
+assert perguntas_sem_resposta(esqueleto) == []
+```
+Resultado: o README do projeto de chuva não tem um título para "como testar" (o comando existe, mas dentro de "Como rodar") nem para licença ou citação. O verificador olha só os títulos, então ele aponta onde **procurar**, não decide sozinho: o autor avalia se vale criar a seção. O esqueleto da @sec-s0-readme passa.
+:::
+
+**Exercício 6 (SQL).** Na tabela `chuva` do exemplo da @sec-s0-sql (use a conexão `banco` criada lá), escreva a consulta que devolve as estações cuja chuva média passa de 10 mm. Depois diga qual seria a média de E02 se a medição que faltou fosse tratada como **zero** e por que isso seria um erro.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 6
+```python
+acima = banco.execute(
+    "SELECT estacao, ROUND(AVG(mm), 1) FROM chuva GROUP BY estacao HAVING AVG(mm) > 10 ORDER BY estacao"
+).fetchall()
+print(acima)
+assert acima == [("E01", 14.0)]
+
+# E02 com a medição ausente tratada como zero
+com_zero = banco.execute(
+    "SELECT ROUND(AVG(COALESCE(mm, 0)), 1) FROM chuva WHERE estacao = 'E02'"
+).fetchone()[0]
+print(com_zero)
+assert com_zero == 5.0
+```
+Resultado: só **E01** passa de 10 mm (média 14,0). Como o filtro é sobre uma **média**, ele vai em `HAVING` (depois do agrupamento), não em `WHERE`. Para E02, tratar o `NULL` como zero (`COALESCE(mm, 0)`) daria **5,0**, abaixo dos 7,5 corretos: a medição que faltou não é "zero chuva", é "não sabemos", e inventar um zero puxa a média para baixo.
+:::
+
+**Exercício 7 (servidor).** (a) Abra duas conexões `sqlite3.connect(":memory:")`, crie uma tabela numa delas e tente consultá-la na outra: o que acontece e por quê? (b) Com as funções da @sec-s0-servidor, ligue um servidor novo (arquivo numa pasta temporária), grave as seis medições como `aluno` e mais uma (E01, 2024-01-04, 18,0) e peça, como `leitor`, a média de E01. Qual é o valor, e por que o `leitor`, que nunca gravou nada, enxerga o dado? Desligue o servidor no fim.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 7
+```python
+# (a) cada ":memory:" é um banco separado e privado
+b1 = sqlite3.connect(":memory:")
+b2 = sqlite3.connect(":memory:")
+b1.execute("CREATE TABLE teste (x)")
+try:
+    b2.execute("SELECT * FROM teste")
+    bancos_separados = False
+except sqlite3.OperationalError as erro:
+    print(erro)
+    bancos_separados = True
+assert bancos_separados
+b1.close()
+b2.close()
+
+# (b) um grava, o outro enxerga: o dado mora no arquivo do servidor
+pasta_ex7 = tempfile.TemporaryDirectory()
+servidor7, porta7 = iniciar(Path(pasta_ex7.name) / "ambiental.db")
+pedir(porta7, *aluno, "CREATE TABLE chuva (estacao TEXT, dia TEXT, mm REAL)")
+for linha in medicoes + [("E01", "2024-01-04", 18.0)]:
+    pedir(porta7, *aluno, "INSERT INTO chuva VALUES (?, ?, ?)", linha)
+resposta = pedir(porta7, *leitor, "SELECT AVG(mm) FROM chuva WHERE estacao = ?", ("E01",))
+media_vista_pelo_leitor = resposta["linhas"][0][0]
+print(media_vista_pelo_leitor)
+assert media_vista_pelo_leitor == 15.0
+servidor7.shutdown()
+servidor7.server_close()
+pasta_ex7.cleanup()
+```
+Resultado: (a) `no such table: teste`. Cada `:memory:` é um banco **separado** e privado, que some quando a conexão fecha; dois programas (ou duas conexões) não compartilham nada. (b) **15,0**, que é (12 + 0 + 30 + 18) / 4. O dado mora no **arquivo do servidor**, não em quem o gravou: todos os clientes falam com o mesmo servidor, que decide o que cada um pode fazer (o `leitor` só consulta). Esse é o ganho de um servidor sobre um banco que só existe dentro de um programa.
+:::
+
+**Desafio (onde estou?).** Escreva `dentro_de_repositorio(laboratorio)`, que diz se a pasta atual do laboratório está dentro de um repositório Git, **sem** deixar o erro aparecer. Dica: `git rev-parse --is-inside-work-tree` responde `true` dentro de um repositório.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do desafio
+```python
+from geocodigo.laboratorio_git import Laboratorio
+
+
+def dentro_de_repositorio(laboratorio):
+    resposta = laboratorio.git("rev-parse --is-inside-work-tree", mostrar=False, ok=False)
+    return resposta == "true"
+
+
+lab_e6 = Laboratorio(identidade=True)
+lab_e6.cd("fora")
+assert dentro_de_repositorio(lab_e6) is False
+lab_e6.cd("dentro")
+lab_e6.git("init", mostrar=False)
+assert dentro_de_repositorio(lab_e6) is True
+lab_e6.escrever("pasta/arquivo.txt", "x", mostrar=False)
+lab_e6.cd("dentro/pasta")                                  # uma subpasta de um repositório também conta
+assert dentro_de_repositorio(lab_e6) is True
+```
+Resultado: fora de um repositório, o Git responde com o erro `fatal: not a git repository` e a função devolve `False`; dentro, ele responde `true` (também numa subpasta), e a função devolve `True`. O parâmetro `ok=False` aceita que o comando falhe, em vez de interromper o programa.
+:::
+
+## Entregável da semana {#sec-s0-entregavel}
+
+No **seu computador**, nesta ordem:
+
+1. **Confira o ambiente** e guarde a saída (cole no Notion, na página do módulo):
+
+   ```bash
+   git --version
+   python --version
+   gh --version
+   gh auth status
+   ```
+2. **Organize as pastas** como na @sec-s0-pasta: o clone do livro numa pasta e, ao lado, um lugar para o seu repositório de treino (você o cria na Semana 1). Rode `pwd` na pasta do livro e veja se o caminho passa pelo OneDrive. Se a pasta do livro não for um clone (por exemplo, foi montada pelo navegador), clone-o como na @sec-s0-pasta.
+3. **Atualize o livro:** `git status -sb` e `git pull`.
+4. **Rode o projeto** (nível B): `python -m chuva resumo` e os testes, dentro de `projeto_chuva`. Anote a última linha da saída dos testes.
+5. **Abra a pasta do livro no VS Code**, abra o terminal integrado e repita o item 4 por ele.
+6. **Faça o passeio** (@sec-s0-passeio): responda às cinco perguntas e confira com o gabarito do exercício 1.
+7. **Escreva o seu glossário:** um arquivo `GLOSSARIO.md` com **dez termos** do vocabulário (@sec-s0-vocabulario), cada um explicado **com as suas palavras**, em uma ou duas linhas. Salve-o **fora** do clone do livro (por exemplo, na pasta `chuva-estacoes` que você cria na Semana 1; até lá, em qualquer pasta sua): na Semana 1, ele vira um dos arquivos do seu repositório de treino.
+
+Registre no Notion o *Nível atual* de P0-00 e uma linha sobre o que travou.
+
+## Autoavaliação {#sec-s0-autoavaliacao}
+
+| Nível | Você consegue... |
+|:--|:--|
+| **1 · Reconheço** | Dizer se um termo (commit, push, issue, pull request, Actions, venv, docstring) é do Git, do GitHub, do editor ou do Python; ler o cabeçalho de `git status -sb`; dizer o que são tabela, linha, coluna e `NULL`; apontar, numa URI como `postgresql://aluno@localhost:5432/ambiental`, o usuário, o host, a porta e o banco. |
+| **2 · Explico** | Explicar a diferença entre Git e GitHub; por que o commit não envia nada; por que o clone do livro deve ser só de leitura; o que cada lugar de documentação responde (README, docstring, comentário, commit, CHANGELOG, issue); por que o SQL ignora o `NULL` na média e por que o valor entra por parâmetro (`?`); explicar, com a analogia do caderno e da secretaria, a diferença entre banco em arquivo e em servidor, e por que `Connection refused` não é defeito do banco. |
+| **3 · Executo** | Abrir o terminal na pasta certa, rodar o projeto e os testes, atualizar o clone, criar e ativar um ambiente virtual, e seguir a rotina de nove passos sem consultar o capítulo. |
+| **4 · Ensino** | Montar uma aula de 30 minutos para quem nunca viu Git, usando a @fig-s0-mapa e o passeio pelo repositório, com um exercício de previsão cujo gabarito foi conferido no laboratório. |
+
+## Para ir além {#sec-s0-alem}
+
+* **GitHub Skills** (learn.github.com/skills; o endereço antigo, skills.github.com, redireciona para lá): cursos curtos e interativos, dentro do próprio GitHub, sobre issues, pull requests e Actions.
+* **Documentação do GitHub** (docs.github.com): em português, com um *Início rápido* e a página de sintaxe de Markdown.
+* **Pro Git**, de Scott Chacon e Ben Straub, gratuito em git-scm.com/book (há tradução em português).
+* **Python:** o tutorial oficial sobre ambientes virtuais (docs.python.org/pt-br/3/tutorial/venv.html), o PEP 8 (estilo) e o PEP 257 (docstrings), em peps.python.org.
+* **VS Code:** a documentação em code.visualstudio.com/docs, em especial *Python in Visual Studio Code*. As extensões *Python* e *Quarto* ajudam, e o painel *Source Control* mostra o Git sem terminal.
+* **Bancos de dados:** a página *Appropriate Uses For SQLite* (sqlite.org/whentouse.html) diz quando o SQLite serve e quando um servidor é melhor; o *Tutorial* da documentação do PostgreSQL (postgresql.org/docs/16/tutorial.html) e a seção *Connection URIs* (postgresql.org/docs/16/libpq-connect.html) ajudam a seguir para o servidor.
+* **Escrever bem para quem programa:** *Keep a Changelog* (keepachangelog.com/pt-BR) e o guia *Write the Docs* (writethedocs.org/guide).
+* **Licenças:** choosealicense.com compara as mais comuns para software; para textos (como o deste livro), há o seletor do Creative Commons em creativecommons.org/choose.

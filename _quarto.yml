@@ -16,6 +16,7 @@ book:
     - part: "P0 · Ambiente e método: módulo de partida (P0-00)"
       chapters:
         - p0-00-visao-geral.qmd
+        - p0-00-semana0-alicerce.qmd
         - p0-00-semana1-git-local.qmd
         - p0-00-semana2-python-testes.qmd
         - p0-00-semana3-github.qmd

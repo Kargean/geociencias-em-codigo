@@ -481,7 +481,7 @@ Repare que, com erro, o programa escreve a mensagem no canal de **erro** e devol
 | tipos (`str`, `float`, `int`, `bool`, `None`) | @sec-s2-tipos | P1-01 |
 | listas, dicionários, conjuntos, compreensões | @sec-s2-colecoes | P1-02 |
 | funções, docstrings, dicas de tipo | @sec-s2-funcoes | P1-03 |
-| arquivos, `csv`, `pathlib`, `with` | @sec-s2-leitura | P1-02 e P1-08 |
+| arquivos, `csv`, `pathlib`, `with` | @sec-s2-leitura | P1-02 e P1-11 |
 | exceções (`try`/`except`, `raise`) | @sec-s2-tipos, @sec-s2-funcoes | P1-02 |
 | `dataclass` | @sec-s2-leitura | P1-03 |
 | módulos e pacotes (`import`, `from . import`, `python -m`) | @sec-s2-cli | P1-03 |

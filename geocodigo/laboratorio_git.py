@@ -72,6 +72,12 @@ class Laboratorio:
             "LC_ALL": "C",
             "LANG": "C",
         }
+        # No Windows, um `env` próprio precisa incluir SystemRoot (documentação do `subprocess`); TEMP, TMP,
+        # COMSPEC e PATHEXT evitam falhas em programas do Git. Em Linux e macOS essas variáveis não existem
+        # (ou são inofensivas). Nunca copiamos HOME, USERPROFILE nem APPDATA: o laboratório fica isolado.
+        for chave in ("SYSTEMROOT", "TEMP", "TMP", "COMSPEC", "PATHEXT"):
+            if chave in os.environ:
+                env[chave] = os.environ[chave]
         return env
 
     def cd(self, pasta: str = "") -> Path:
