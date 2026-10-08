@@ -1,5 +1,9 @@
 _book/
 .quarto/
+# Estas duas linhas exatas são as que o Quarto acrescenta sozinho ao .gitignore quando não as encontra;
+# tê-las aqui evita que `quarto preview` ou `quarto render` deixem o `git status` do clone sujo.
+/.quarto/
+**/*.quarto_ipynb
 _freeze/
 __pycache__/
 *.pyc
