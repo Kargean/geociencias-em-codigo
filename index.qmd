@@ -42,5 +42,5 @@ O acompanhamento de estudo (módulos, níveis e datas) fica no Notion; o código
 
 ::: {.callout-warning}
 ## Estado atual
-Estão escritos o módulo de partida **P0-00** (visão geral e cinco capítulos de semana, da Semana 0 à 4) e o capítulo de exemplo do P9-06. O restante do mapa será produzido semana a semana, sob demanda, com os mesmos critérios, e este livro é corrigido e atualizado pelo mesmo processo que o módulo P0-00 ensina (@sec-ciclo).
+Estão escritos o módulo de partida **P0-00** (visão geral e cinco capítulos de semana, da Semana 0 à 4), o primeiro capítulo de SQL, **P1-06** (@sec-p106), e o capítulo de exemplo do P9-06. O restante do mapa será produzido semana a semana, sob demanda, com os mesmos critérios, e este livro é corrigido e atualizado pelo mesmo processo que o módulo P0-00 ensina (@sec-ciclo).
 :::
