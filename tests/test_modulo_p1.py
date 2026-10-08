@@ -14,6 +14,7 @@ nem que o registro do PostgreSQL continua valendo em outras versões.
 """
 import contextlib
 import io
+import math
 import re
 import sqlite3
 import sys
@@ -325,7 +326,7 @@ CONFERENCIAS_107 = {
     "agregados", "media_ingenua", "vazio", "campanhas", "por_parametro", "od_por_ponto", "coluna_solta", "grupo_null",
     "having", "having_contagem", "min_ou_media", "conformidade", "left_inner_fontes", "left_contagem", "where_ou_on",
     "anti_join", "fanout_contagem", "fanout_media", "fanout_por_ponto", "fanout_remendos", "fanout_correcao",
-    "pandas_groupby", "pandas_dropna", "pandas_merge", "pandas_validate", "pandas_to_sql", "relatorio",
+    "pandas_groupby", "pandas_dropna", "pandas_merge", "pandas_validate", "pandas_limites", "pandas_to_sql", "relatorio",
 }
 
 
@@ -404,6 +405,7 @@ class CapituloP107(unittest.TestCase):
         ns = self.ns
         self.assertEqual(ns["having_sql"], [("P02", 3, 4.93)])
         self.assertIn("misuse of aggregate", ns["erro_agregado_no_where"])
+        self.assertEqual(ns["AMOSTRAS_MINIMAS"], 2)
         self.assertEqual(ns["minimo_sql"], [("P01", 3, 7.47), ("P02", 3, 4.93)])      # P03 (1 só resultado) fica de fora
         self.assertEqual(ns["alguma_sql"], [("P02", 3, 3.9)])
 
@@ -457,6 +459,8 @@ class CapituloP107(unittest.TestCase):
         self.assertEqual((len(ns["m_interno"]), len(ns["m_externo"])), (22, 31))
         self.assertEqual((len(ns["grupos_padrao"]), len(ns["grupos_com_nan"])), (5, 6))
         self.assertTrue(ns["erro_validate"].startswith("Merge keys are not unique"))
+        self.assertEqual(ns["n_orfaos"], 1)                          # validate="many_to_one" não acusa a chave órfã
+        self.assertEqual((ns["n_linhas_pandas"], ns["n_linhas_sql"]), (2, 1))   # NaN casa com NaN no pandas; NULL não casa no SQL
         self.assertTrue(ns["perdeu_regras"])                         # o to_sql(replace) perde as regras da tabela
         self.assertEqual((ns["linhas_guardadas"], ns["linhas_depois_do_ruim"]), (20, 20))
         self.assertTrue(ns["recusou_dado_ruim"])
@@ -473,6 +477,7 @@ class CapituloP107(unittest.TestCase):
         self.assertEqual(set(ns["POSTGRESQL_16_15"]), chaves)                       # o registro cobre cada sonda
         sq, pg = ns["dialeto_sqlite"], ns["POSTGRESQL_16_15"]
         self.assertEqual(sq["coluna_solta"], "3")
+        self.assertEqual(sq["having_coluna_solta"], "3")                            # o SQLite aceita a coluna solta no HAVING
         self.assertEqual(sq["round_media"], "6.2")
         self.assertEqual(sq["avg_inteiros"], "1.5")
         self.assertTrue(sq["agregado_where"].startswith("ERRO"))
@@ -484,7 +489,7 @@ class CapituloP107(unittest.TestCase):
         self.assertEqual(pg["ordem_null"], "9")                                     # o PostgreSQL põe o NULL por último
         self.assertEqual(pg["conjunto_vazio"], sq["conjunto_vazio"])
         self.assertEqual(pg["avg_distinct"], "6.0000000000000000")
-        for chave in ("coluna_solta", "apelido_having", "round_media", "agregado_where", "group_concat", "div_zero_pct", "fk_padrao", "pk_texto_nulo"):
+        for chave in ("coluna_solta", "having_coluna_solta", "apelido_having", "round_media", "agregado_where", "group_concat", "div_zero_pct", "fk_padrao", "pk_texto_nulo"):
             self.assertTrue(pg[chave].startswith("ERRO"), chave)
 
     def test_roteiro_do_postgresql_cobre_cada_sonda_e_nao_tem_segredo(self):
@@ -526,6 +531,41 @@ class CapituloP107(unittest.TestCase):
         ):
             self.assertIn(citacao, texto, citacao)
 
+    def test_numeros_da_prosa_batem_com_os_valores_calculados_pelo_codigo(self):
+        """Cada número abaixo aparece no texto e sai, formatado à brasileira, de um valor que o código do capítulo calculou."""
+        ns, texto = self.ns, self.texto
+
+        def br(x, casas):
+            return f"{x:.{casas}f}".replace(".", ",")
+
+        por_ponto = {linha[0]: linha for linha in ns["fanout_por_ponto"]}          # (ponto, linhas, distintas, soma, media)
+        relatorio = {linha[0]: linha for linha in ns["relatorio_sql"]}             # (ponto, campanhas, medidos, fora, pct)
+        largo = {linha[0]: linha for linha in ns["largo_sql"]}                     # (ponto, od, ph, turbidez)
+        ligados = [
+            (br(por_ponto["P02"][3], 1), "soma de P02 depois do LEFT JOIN"),                        # 29,6
+            (br(ns["soma_certa"]["P02"], 1), "soma certa de P02"),                                  # 14,8
+            (br(por_ponto["P03"][3], 1), "soma de P03 depois do LEFT JOIN"),                        # 13,0
+            (br(ns["media_interna"], 2), "média depois do JOIN interno"),                           # 5,33
+            (br(ns["media_externa"], 2), "média depois do LEFT JOIN"),                              # 5,91
+            (br(relatorio["P02"][4], 0) + "% de conformidade", "conformidade de P02"),              # 50% de conformidade
+            (br(largo["P01"][2], 2), "pH médio de P01"),                                            # 7,03
+            (f"turbidez {br(largo['P01'][3], 1)}", "turbidez média de P01"),                        # turbidez 13,0
+        ]
+        for citado, o_que in ligados:
+            self.assertIn(citado, texto, o_que)
+        # o limiar do ROUND de 2 casas cobre o pior caso (ROUND(0.125, 2) = 0.13) e o capítulo não usa isclose sem tolerância
+        self.assertTrue(math.isclose(0.13, 0.125, abs_tol=ns["TOL_DUAS_CASAS"]))
+        for m in re.finditer(r"^```(?:\{python\}|python)[ \t]*\n(.*?)^```", texto, re.S | re.M):
+            codigo = m.group(1)
+            for achado in re.finditer(r"math\.isclose\(", codigo):
+                nivel, fim = 0, achado.end() - 1
+                for i in range(achado.end() - 1, len(codigo)):
+                    nivel += {"(": 1, ")": -1}.get(codigo[i], 0)
+                    if nivel == 0:
+                        fim = i
+                        break
+                self.assertIn("abs_tol", codigo[achado.start():fim], codigo[achado.start():fim + 1])
+
 
 class EstruturaP107(unittest.TestCase):
     def test_o_capitulo_tem_as_secoes_do_metodo(self):
@@ -539,6 +579,18 @@ class EstruturaP107(unittest.TestCase):
         rotulos = re.findall(r"\{#(sec-[\w-]+)", texto)
         self.assertTrue(all(r.startswith("sec-p107") for r in rotulos), rotulos)
         self.assertEqual(len(rotulos), len(set(rotulos)))
+
+    def test_todo_cabecalho_tem_linha_em_branco_antes(self):
+        """O Pandoc só reconhece '## Título' depois de uma linha em branco (ou logo após a abertura de um bloco ':::')."""
+        for caminho in sorted(RAIZ.glob("*.qmd")):
+            dentro, linhas = False, caminho.read_text(encoding="utf-8").split("\n")
+            for i, linha in enumerate(linhas):
+                if linha.startswith("```"):
+                    dentro = not dentro
+                elif not dentro and re.match(r"#{1,6} ", linha) and i > 0:
+                    anterior = linhas[i - 1]
+                    self.assertTrue(anterior.strip() == "" or re.match(r":{3,} *\{", anterior),
+                                    f"{caminho.name}, linha {i + 1}: cabeçalho sem linha em branco antes: {linha}")
 
     def test_a_figura_tem_rotulo_legenda_texto_alternativo_e_referencia(self):
         texto = ler(CAPITULO_107)

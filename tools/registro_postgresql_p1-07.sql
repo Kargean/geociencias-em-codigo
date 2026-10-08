@@ -82,6 +82,8 @@ SELECT po.codigo, ROUND(CAST(AVG(CASE WHEN r.parametro = 'OD' THEN r.valor END) 
 \echo '=== Sondas de dialeto ==='
 \echo '@@ coluna_solta'
 SELECT COUNT(*) FROM (SELECT ponto, valor FROM resultado GROUP BY ponto) AS t;
+\echo '@@ having_coluna_solta'
+SELECT COUNT(*) FROM (SELECT ponto FROM resultado GROUP BY ponto HAVING parametro = 'OD') AS t;
 \echo '@@ apelido_having'
 SELECT ponto, AVG(valor) AS media FROM resultado GROUP BY ponto HAVING media < 10 ORDER BY ponto;
 \echo '@@ round_media'
