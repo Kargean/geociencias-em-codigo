@@ -27,6 +27,7 @@ Este arquivo é a memória do projeto. Leia-o ao começar uma sessão e atualize
 6. Decisões de limpeza e de limiar ficam **em constantes nomeadas e documentadas**, nunca escondidas.
 7. **Recursos abertos são fechados em `finally`** (conexões de banco, arquivos). O autor usa Windows, onde arquivo aberto não pode ser apagado; o Linux perdoa. Testes de código que abre arquivos devem conferir o fechamento.
 8. **Comandos de terminal nos capítulos são escritos para o Git Bash** (blocos `bash`). O autor usa Windows com PowerShell, e três coisas mudam lá: a continuação de linha (`\` vira acento grave), o `&&` (não existe no Windows PowerShell 5.1) e a ativação do `venv`. Quando um comando copiável depende disso, o capítulo traz um bloco `powershell` ou uma nota (tabela na Semana 0). Blocos `bash` não usam acento grave.
+9. **Exemplos sempre ambientais e de aplicação real** (pedido do autor, 08/10/2026). Use dados sintéticos (a verdade é conhecida) ou exemplos existentes (dados abertos e casos publicados, com fonte, data e versão registradas), voltados a questões ambientais e a aplicações reais. Evite exemplos abstratos sem contexto (`foo`, `bar`, `x`, `y`).
 
 ## Como rodar os testes
 
