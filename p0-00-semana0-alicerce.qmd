@@ -12,11 +12,11 @@
 3. rodar os exemplos do livro de quatro maneiras, da mais simples (ler) à mais completa (renderizar o livro), mantendo o **seu** trabalho separado do livro;
 4. escolher, para cada informação, o lugar certo onde escrevê-la: comentário, docstring, mensagem de commit, README, CHANGELOG, issue ou teste;
 5. seguir uma rotina curta a cada sessão de estudo (atualizar, trabalhar, conferir, gravar, enviar) e reconhecer os primeiros erros típicos;
-6. dizer o que é um banco de dados relacional e o que é SQL, e onde rodar uma consulta (só o essencial: o estudo sistemático de SQL vem nos módulos P1-06 a P1-08).
+6. dizer o que é um banco de dados relacional e o que é SQL, onde rodar uma consulta e qual é a diferença entre um banco em arquivo (SQLite) e um banco em servidor (PostgreSQL): cliente, servidor, host, porta, usuário e permissão (só o essencial: o estudo sistemático de SQL vem nos módulos P1-06 a P1-08).
 
 **Pré-requisitos:** nenhum. Este capítulo parte do zero. Se Git, Python e a CLI `gh` ainda não estão instalados, comece pela @sec-instalar. O VS Code (editor gratuito) é recomendado, mas não obrigatório.
 
-**Tempo sugerido:** 4 h, em duas sessões: (1) da @sec-s0-mapa até a @sec-s0-passeio, só leitura e exploração do site; (2) da @sec-s0-documentar até a @sec-s0-entregavel, no seu computador.
+**Tempo sugerido:** 4 h 30, em duas sessões: (1) da @sec-s0-mapa até a @sec-s0-passeio, só leitura e exploração do site; (2) da @sec-s0-documentar até a @sec-s0-entregavel, no seu computador.
 :::
 
 ## O mapa numa página {#sec-s0-mapa}
@@ -613,9 +613,9 @@ python tools/executar_codigo_qmd.py p0-00-semana0-alicerce.qmd --gabaritos
 
 ### E o SQL? Onde rodar as consultas {#sec-s0-sql}
 
-No curso, **SQL é alicerce do mesmo tamanho que Python**: ele tem módulos próprios (P1-06 a P1-08, logo depois do pandas), é aprofundado no P3-01 e no P3-02 e é o coração do aplicativo com banco de dados do P3-11. Aqui vai só o mapa mínimo, para você saber o que é e onde rodar. A Semana 4 deste módulo dá uma primeira volta aplicada.
+No curso, **SQL é alicerce do mesmo tamanho que Python**: ele tem módulos próprios (P1-06 a P1-08, logo depois do pandas), é aprofundado no P3-01 e no P3-02 e é o coração do aplicativo com banco de dados do P3-12. Aqui vai só o mapa mínimo, para você saber o que é e onde rodar. A Semana 4 deste módulo dá uma primeira volta aplicada.
 
-**O que é.** Um banco de dados relacional guarda dados em **tabelas**. Cada **linha** é um registro (uma medição) e cada **coluna** é um atributo (estação, dia, chuva em mm). **SQL** é a linguagem para perguntar e alterar: você descreve **o que** quer e o banco decide **como** buscar. O **SQLite** é um banco inteiro dentro de **um arquivo**, sem servidor para instalar, e já vem com o Python (módulo `sqlite3`).
+**O que é.** Um banco de dados relacional guarda dados em **tabelas**. Cada **linha** é um registro (uma medição) e cada **coluna** é um atributo (estação, dia, chuva em mm). **SQL** é a linguagem para perguntar e alterar: você descreve **o que** quer e o banco decide **como** buscar. O **SQLite** é um banco inteiro dentro de **um arquivo**, sem servidor para instalar, e já vem com o Python (módulo `sqlite3`). O que é um servidor de banco de dados, e por que existe, está na @sec-s0-servidor, logo depois desta seção.
 
 | Onde rodar SQL | Como | O que precisa | Testado para este capítulo? |
 |:--|:--|:--|:--|
@@ -699,6 +699,306 @@ print("tabelas criadas pelo esquema.sql:", tabelas)
 ```
 
 **Limites.** Só o caminho "dentro do Python" foi executado, e no Linux; o DB Browser, o comando `sqlite3` e as extensões do VS Code **não foram testados**, e o bloco acima ainda não rodou no Windows (o teste automático do Windows só roda o projeto de chuva). Se algo falhar aí, abra um issue com a mensagem de erro completa (@sec-ajuda).
+
+### E o servidor? Banco em arquivo × banco em servidor {#sec-s0-servidor}
+
+Na seção anterior, o SQLite era "um banco dentro de um arquivo". Cedo ou tarde você vai ouvir outras palavras: *PostgreSQL*, *servidor de banco de dados*, *host*, *porta*, *usuário e senha*. Elas descrevem **outra maneira** de guardar dados, e entendê-la agora evita muita confusão depois (a Parte P3 inteira usa isso). O caminho é: uma analogia, um vocabulário, **um servidor de brinquedo que roda de verdade** (cabe numa tela de Python) e, só então, o registro de uma sessão com um servidor real.
+
+**Duas maneiras de guardar os mesmos dados.** Pense em como uma equipe guarda as medições de chuva.
+
+* **Banco em arquivo (SQLite) = caderno de campo.** O caderno está na sua mochila: você abre, lê, escreve e fecha, sem pedir nada a ninguém e sem internet. Mas, se duas pessoas tentarem escrever **na mesma página ao mesmo tempo**, dá confusão; e um caderno deixado numa pasta compartilhada da rede pode ser estragado.
+* **Banco em servidor (PostgreSQL) = secretaria do laboratório.** Os registros ficam numa sala trancada, que só a atendente abre. Você vai ao balcão, mostra o crachá (usuário e senha), faz o **pedido** ("qual é a média de chuva da estação E01?") e a atendente consulta os arquivos e entrega a **resposta**. Muita gente é atendida ao mesmo tempo, a atendente decide quem pode só consultar e quem pode alterar, e a sala trancada pode ficar em **outro prédio** (outro computador).
+
+```text
+  BANCO EM ARQUIVO (SQLite)                 BANCO EM SERVIDOR (PostgreSQL)
+
+  seu programa ──abre e escreve──▶ .db      programa A ──┐
+  (o próprio programa mexe                  programa B ──┼──pedidos──▶ SERVIDOR ──▶ arquivos do banco
+   no arquivo)                              programa C ──┘  (pela rede)  (único que    (ninguém mais
+                                                                          os abre)       os abre)
+```
+
+**O vocabulário, com a analogia da secretaria.**
+
+| Termo | Em uma frase | Na analogia | Onde aparece |
+|:--|:--|:--|:--|
+| **Servidor** | programa que fica ligado, esperando pedidos | a atendente | o processo `postgres`; o `ServidorDeBrinquedo` abaixo |
+| **Cliente** | programa que faz o pedido | quem chega ao balcão | `psql`, o QGIS, um script Python; a função `pedir` abaixo |
+| **Host** | em qual máquina o servidor está | o endereço do prédio | `localhost` (ou `127.0.0.1`) significa "esta mesma máquina" |
+| **Porta** | qual "guichê" da máquina atende esse serviço (um número) | o número do guichê | o PostgreSQL usa a **5432**, se ninguém mudar |
+| **Usuário** (*role*, papel) e **senha** | quem você é e a prova disso | o crachá | `aluno`, `leitor` |
+| **Permissão** | o que cada usuário pode fazer | o que o crachá abre | `GRANT SELECT ON chuva TO leitor` |
+| **Conexão** | a conversa aberta entre cliente e servidor | o atendimento no balcão | uma conexão por cliente |
+| **Protocolo** | o "idioma" combinado para pedir e responder | a forma do formulário | no brinquedo, uma linha de JSON; no PostgreSQL, o protocolo próprio dele |
+
+Um endereço de banco costuma vir numa linha só, a *URI de conexão*, que reúne usuário, host, porta e nome do banco: `postgresql://aluno@localhost:5432/ambiental` (cada parte é opcional; veja a seção *Connection URIs* da documentação do PostgreSQL, em [postgresql.org/docs/16/libpq-connect.html](https://www.postgresql.org/docs/16/libpq-connect.html)). **Nunca** escreva a senha numa URI que vá para o GitHub.
+
+**Um servidor de brinquedo que funciona.** A melhor forma de entender um servidor é construir um mínimo. O código abaixo (regra do método: construir a ferramenta uma vez antes de usar a pronta) usa só a biblioteca padrão do Python e tem cinco peças:
+
+1. as **constantes** no topo (endereço, tempo limite, quem pode entrar e com qual permissão), nomeadas e comentadas, como pede a regra 6 do método;
+2. o `ServidorDeBrinquedo`, que fica ligado esperando, é o **único** a abrir o arquivo do banco e **confere o crachá** antes de qualquer coisa;
+3. um `Atendente` por cliente, num fio de execução (*thread*) próprio: por isso vários clientes são atendidos ao mesmo tempo; as escritas, porém, passam por uma **fila** (`fila_de_escrita`), uma de cada vez;
+4. para o usuário de leitura, o arquivo é aberto em modo **somente leitura** (`mode=ro`): o próprio SQLite recusa qualquer escrita;
+5. a função `pedir`, que é o **cliente**: conecta, envia o pedido (uma linha de JSON) e lê a resposta.
+
+**Convenções deste bloco.** Endereço `127.0.0.1` (só esta máquina); porta escolhida pelo sistema operacional (pedir a porta `0` significa "me dê uma livre"); cada pedido e cada resposta são **uma linha de JSON**; chuva em mm.
+
+```{python}
+#| label: s0-servidor-codigo
+#| code-fold: true
+#| code-summary: "Ver o código do servidor e do cliente (cerca de 85 linhas)"
+import json
+import socket
+import socketserver
+import sqlite3
+import tempfile
+import threading
+from contextlib import closing, nullcontext
+from pathlib import Path
+
+ENDERECO = "127.0.0.1"             # "esta máquina": só programas daqui conseguem conectar
+PORTA_ESCOLHIDA_PELO_SISTEMA = 0   # 0 = o sistema operacional escolhe uma porta livre
+TEMPO_LIMITE_S = 5                 # ninguém espera para sempre (cliente lento ou travado)
+USUARIOS = {                       # usuário: (senha, permissão). Senhas de BRINQUEDO.
+    "aluno": ("brinquedo-1", "escrita"),
+    "leitor": ("brinquedo-2", "leitura"),
+}
+
+
+def _sem_attach(acao, *_resto):
+    """Recusa ATTACH, que deixaria o cliente abrir outros arquivos da máquina."""
+    return sqlite3.SQLITE_DENY if acao == sqlite3.SQLITE_ATTACH else sqlite3.SQLITE_OK
+
+
+class Atendente(socketserver.StreamRequestHandler):
+    """Atende UM cliente: lê um pedido (uma linha de JSON) e devolve uma resposta."""
+
+    timeout = TEMPO_LIMITE_S
+
+    def handle(self):
+        try:
+            pedido = json.loads(self.rfile.readline().decode("utf-8"))
+            resposta = self.server.responder(pedido)
+        except (ValueError, AttributeError, OSError):
+            resposta = {"ok": False, "erro": "pedido inválido"}
+        self.wfile.write((json.dumps(resposta) + "\n").encode("utf-8"))
+
+
+class ServidorDeBrinquedo(socketserver.ThreadingTCPServer):
+    """Só ele abre o arquivo do banco; os clientes falam com ele pela rede."""
+
+    daemon_threads = True
+
+    def __init__(self, arquivo_do_banco):
+        super().__init__((ENDERECO, PORTA_ESCOLHIDA_PELO_SISTEMA), Atendente)
+        self.arquivo = Path(arquivo_do_banco)
+        self.fila_de_escrita = threading.Lock()  # uma escrita de cada vez
+
+    def responder(self, pedido):
+        usuario = pedido.get("usuario")
+        if usuario not in USUARIOS or USUARIOS[usuario][0] != pedido.get("senha"):
+            return {"ok": False, "erro": "autenticação falhou"}
+        somente_leitura = USUARIOS[usuario][1] == "leitura"
+        trava = nullcontext() if somente_leitura else self.fila_de_escrita
+        try:
+            with trava:
+                if somente_leitura:  # o próprio SQLite barra qualquer escrita
+                    conexao = sqlite3.connect(self.arquivo.as_uri() + "?mode=ro",
+                                              uri=True, timeout=TEMPO_LIMITE_S)
+                else:
+                    conexao = sqlite3.connect(self.arquivo, timeout=TEMPO_LIMITE_S)
+                with closing(conexao):
+                    conexao.set_authorizer(_sem_attach)
+                    cursor = conexao.execute(pedido["sql"], pedido.get("params", []))
+                    linhas = cursor.fetchall()
+                    conexao.commit()
+                    colunas = [c[0] for c in cursor.description] if cursor.description else []
+            return {"ok": True, "colunas": colunas, "linhas": linhas}
+        except (sqlite3.Error, KeyError) as erro:
+            return {"ok": False, "erro": str(erro)}
+
+
+def iniciar(arquivo_do_banco):
+    """Liga o servidor num fio paralelo e devolve (servidor, porta)."""
+    servidor = ServidorDeBrinquedo(arquivo_do_banco)
+    threading.Thread(target=servidor.serve_forever, daemon=True).start()
+    return servidor, servidor.server_address[1]
+
+
+def pedir(porta, usuario, senha, sql, params=()):
+    """O CLIENTE: abre uma conexão, envia um pedido e lê a resposta."""
+    pedido = {"usuario": usuario, "senha": senha, "sql": sql, "params": list(params)}
+    with socket.create_connection((ENDERECO, porta), timeout=TEMPO_LIMITE_S) as ligacao:
+        ligacao.sendall((json.dumps(pedido) + "\n").encode("utf-8"))
+        with ligacao.makefile("r", encoding="utf-8") as resposta:
+            return json.loads(resposta.readline())
+```
+
+Agora o uso, em seis passos. O bloco reaproveita `medicoes`, `consulta` e `resultado_sql` da seção anterior e usa uma **pasta temporária** para o arquivo do banco (ela some no fim).
+
+```{python}
+#| label: s0-servidor-uso
+#| code-fold: true
+#| code-summary: "Ver o código"
+pasta_temporaria = tempfile.TemporaryDirectory()
+arquivo_do_banco = Path(pasta_temporaria.name) / "ambiental.db"
+servidor, porta = iniciar(arquivo_do_banco)  # 1) liga o servidor
+print("servidor ligado em", ENDERECO, "(a porta muda a cada execução)")
+
+aluno = ("aluno", "brinquedo-1")    # crachás: (usuário, senha)
+leitor = ("leitor", "brinquedo-2")
+
+# 2) o aluno cria a tabela e grava as seis medições da seção anterior
+pedir(porta, *aluno, "CREATE TABLE chuva (estacao TEXT, dia TEXT, mm REAL)")
+for linha in medicoes:
+    pedir(porta, *aluno, "INSERT INTO chuva VALUES (?, ?, ?)", linha)
+
+# 3) a MESMA consulta da seção anterior, agora por meio do servidor
+medias = pedir(porta, *aluno, consulta)["linhas"]
+print(medias)
+print("servidor e SQL local concordam:", medias == [list(l) for l in resultado_sql])
+
+# 4) o leitor pode consultar, mas não escrever; senha errada nem entra
+leitura_do_leitor = pedir(porta, *leitor, "SELECT COUNT(*) FROM chuva")["linhas"][0][0]
+tentativa_do_leitor = pedir(porta, *leitor, "INSERT INTO chuva VALUES ('E03', '2024-01-01', 3.0)")
+senha_errada = pedir(porta, "aluno", "errada", "SELECT 1")
+print("leitor consulta:", leitura_do_leitor, "linhas")
+print("leitor tenta gravar:", tentativa_do_leitor["erro"])
+print("senha errada:", senha_errada["erro"])
+
+# 5) quatro clientes gravando ao mesmo tempo: a fila do servidor organiza
+def registrar(dia):
+    pedir(porta, *aluno, "INSERT INTO chuva VALUES (?, ?, ?)", ("E03", f"2024-01-0{dia}", float(dia)))
+
+fios = [threading.Thread(target=registrar, args=(dia,)) for dia in range(1, 5)]
+for fio in fios:
+    fio.start()
+for fio in fios:
+    fio.join()
+total_de_linhas = pedir(porta, *aluno, "SELECT COUNT(*) FROM chuva")["linhas"][0][0]
+print("depois de 4 clientes ao mesmo tempo:", total_de_linhas, "linhas (6 + 4)")
+
+# 6) desliga o servidor: quem tentar falar com ele agora é recusado
+servidor.shutdown()
+servidor.server_close()
+try:
+    pedir(porta, *aluno, "SELECT 1")
+except OSError as erro:
+    nome_do_erro = type(erro).__name__
+    print("servidor desligado:", nome_do_erro)
+pasta_temporaria.cleanup()
+```
+
+**Como ler a saída.** (1) Pela rede, a consulta devolveu a mesma resposta do SQLite direto (E01 14,0 e E02 7,5, com o `NULL` ignorado): o servidor não muda o SQL, muda **quem** executa e **de onde** se pede. (2) O leitor consegue consultar, mas a gravação é recusada com `attempt to write a readonly database`: foi o servidor que decidiu isso, não o cliente. (3) Com a senha errada, a mensagem é só `autenticação falhou`, e o pedido nem chega a ser executado. (4) Quatro clientes gravaram ao mesmo tempo e nenhuma linha se perdeu, porque o servidor serializou as escritas. (5) Depois do desligamento, o cliente recebe **conexão recusada** (no Linux, `ConnectionRefusedError`): ninguém está atendendo naquele endereço. É o erro mais comum de quem começa com servidores, e quase nunca é problema no banco.
+
+::: {.callout-warning}
+## Este servidor é de brinquedo: não o exponha à rede
+Ele serve para entender a ideia, e **só** isso. Deliberadamente, ele:
+
+* escuta só em `127.0.0.1`; **nunca** troque por `0.0.0.0` ou pelo IP da rede: qualquer um conseguiria falar com ele;
+* trafega a senha **em texto puro**, sem criptografia, e a guarda no código-fonte; senha de verdade fica fora do repositório (variável de ambiente ou arquivo ignorado pelo Git) e **nunca** vai para o GitHub;
+* não limita tentativas de senha, não registra quem fez o quê e executa **qualquer SQL** de quem tem senha (por isso o `_sem_attach`, que fecha só uma das portas perigosas).
+
+Servidores de verdade resolvem isso: o PostgreSQL guarda senhas embaralhadas (a instalação de teste usada abaixo mostrou `scram-sha-256` como método), aceita conexões cifradas (TLS), tem permissões por tabela e pode registrar os acessos. Só o método da senha foi conferido na instalação de teste; os demais recursos são os descritos na documentação. **Não foi testado** num Windows: espera-se que não apareça aviso de firewall, porque só escutamos nesta máquina; **se aparecer, negue** o acesso a redes e abra um issue (@sec-ajuda).
+:::
+
+**Banco em arquivo × banco em servidor, lado a lado.**
+
+| | SQLite (arquivo) | PostgreSQL (servidor) |
+|:--|:--|:--|
+| Onde estão os dados | num arquivo `.db` que o seu programa abre | em pastas que **só o servidor** abre |
+| O que precisa estar rodando | nada: é uma biblioteca dentro do programa | um processo servidor, ligado |
+| Instalação | já vem com o Python | instalar e configurar (usuários, senhas, porta) |
+| Quem entra | quem consegue abrir o arquivo | quem tem usuário, senha e permissão |
+| Vários ao mesmo tempo | leitores ilimitados, mas **um escritor por vez** | feito para muitos clientes ao mesmo tempo |
+| Pela rede | **não** é indicado abrir o arquivo numa pasta de rede (o travamento de arquivos falha em muitas implementações e pode corromper o banco) | é o uso normal: o cliente fala com o servidor |
+| Permissões finas (por tabela) | não | sim (`GRANT`) |
+| Dialeto do SQL | o do SQLite | o do PostgreSQL: parecido, **com diferenças** (veja abaixo) |
+| Bom para | estudo, protótipo, programa de um usuário só, troca de arquivos | sistemas compartilhados, aplicativos web e APIs, dados espaciais com PostGIS |
+
+As linhas sobre o SQLite vêm da página *Appropriate Uses For SQLite* ([sqlite.org/whentouse.html](https://www.sqlite.org/whentouse.html), consultada em 08/10/2026): "SQLite supports an unlimited number of simultaneous readers, but it will only allow one writer at any instant in time"; "If there are many client programs sending SQL to the same database over a network, then use a client/server database engine instead of SQLite"; e "file locking logic is buggy in many network filesystem implementations", o que pode causar corrupção. Uma curiosidade ligada à geotecnologia: o **GeoPackage**, formato aberto de dados geoespaciais, é, por dentro, um arquivo SQLite. As linhas sobre o PostgreSQL vêm da documentação (versão 16) e da sessão registrada abaixo.
+
+**Um servidor de verdade: o registro de uma sessão.** O que segue é o registro de uma sessão com o **PostgreSQL 16.15** num computador Linux, em 08/10/2026, usando o `psql`, o cliente de linha de comando do PostgreSQL. **O livro não executa este bloco**: não há PostgreSQL no verificador. É uma cópia do que o servidor devolveu, executada uma vez; as senhas eram de teste e foram omitidas. Foram editados só o formato (o prompt `ambiental=>` foi acrescentado antes de cada comando e o pedido de senha foi omitido). Primeiro, o que o **administrador** do servidor digitou, uma vez, para preparar tudo (`<...>` marca o lugar das senhas):
+
+```sql
+-- como administrador (superusuário) do servidor
+CREATE ROLE aluno  LOGIN PASSWORD '<senha-do-aluno>';
+CREATE ROLE leitor LOGIN PASSWORD '<senha-do-leitor>';
+CREATE DATABASE ambiental OWNER aluno;
+
+-- depois, conectado ao banco ambiental como aluno
+CREATE TABLE chuva (estacao text, dia date, mm real);
+INSERT INTO chuva VALUES
+  ('E01', '2024-01-01', 12), ('E01', '2024-01-02', 0), ('E01', '2024-01-03', 30),
+  ('E02', '2024-01-01', 5),  ('E02', '2024-01-02', NULL), ('E02', '2024-01-03', 10);
+GRANT SELECT ON chuva TO leitor;   -- o leitor só pode consultar
+```
+
+Em seguida, a sessão dos clientes:
+
+```text
+$ psql "postgresql://aluno@localhost:5432/ambiental"
+ambiental=> SELECT current_user, inet_server_port();
+ current_user | inet_server_port 
+--------------+------------------
+ aluno        |             5432
+(1 row)
+
+ambiental=> SELECT estacao, COUNT(mm) AS dias_medidos, ROUND(AVG(mm), 1) AS media_mm FROM chuva GROUP BY estacao ORDER BY estacao;
+ERROR:  function round(double precision, integer) does not exist
+LINE 1: SELECT estacao, COUNT(mm) AS dias_medidos, ROUND(AVG(mm), 1)...
+                                                   ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+
+ambiental=> SELECT estacao, COUNT(mm) AS dias_medidos, ROUND(AVG(mm)::numeric, 1) AS media_mm FROM chuva GROUP BY estacao ORDER BY estacao;
+ estacao | dias_medidos | media_mm 
+---------+--------------+----------
+ E01     |            3 |     14.0
+ E02     |            2 |      7.5
+(2 rows)
+
+$ psql "postgresql://leitor@localhost:5432/ambiental"
+ambiental=> SELECT COUNT(*) FROM chuva;
+ count 
+-------
+     6
+(1 row)
+
+ambiental=> INSERT INTO chuva VALUES ('E03', '2024-01-01', 3);
+ERROR:  permission denied for table chuva
+
+$ psql "postgresql://aluno@localhost:5432/ambiental"      (com a senha errada)
+psql: error: connection to server at "localhost" (127.0.0.1), port 5432 failed: FATAL:  password authentication failed for user "aluno"
+connection to server at "localhost" (127.0.0.1), port 5432 failed: FATAL:  password authentication failed for user "aluno"
+
+$ psql "postgresql://aluno@localhost:5999/ambiental"      (porta onde ninguém atende)
+psql: error: connection to server at "localhost" (127.0.0.1), port 5999 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?
+```
+
+(A segunda linha do erro de senha repete a primeira: é assim que o `psql` a imprimiu.) O que observar, comparando com o brinquedo:
+
+* **A URI** `postgresql://aluno@localhost:5432/ambiental` é usuário, host, porta e banco; a porta 5432 é a padrão do PostgreSQL, e `inet_server_port()` confirma em qual porta o servidor atendeu.
+* **A mesma resposta:** 14,0 e 7,5, com o `NULL` ignorado, como no SQLite e no Python.
+* **`permission denied for table chuva`** é a versão de verdade do nosso `readonly`: aqui a barreira é o `GRANT`, e o leitor só recebeu `SELECT`.
+* **`password authentication failed`** (senha errada) e **`Connection refused`** (ninguém atende no host e porta pedidos) são os dois primeiros erros que você vai ver na vida. Eles se distinguem: no primeiro, o servidor **respondeu** e recusou o crachá; no segundo, **nem houve resposta**.
+
+::: {.callout-note}
+## SQL "padronizado" não é SQL igual
+O mesmo `ROUND(AVG(mm), 1)` que funcionou no SQLite **falhou** no PostgreSQL. O motivo, conforme a mensagem: `AVG` de uma coluna `real` devolve `double precision`, e o PostgreSQL só tem `ROUND(valor, casas)` para o tipo `numeric`. O conserto é converter: `AVG(mm)::numeric`. O SQLite é mais tolerante com tipos, e por isso o erro não apareceu antes. A lição: aprender SQL é aprender o **núcleo comum** e saber que cada banco tem **dialeto**. Quando um código passar de um banco para outro, rode os testes de novo; o módulo P1-06 vai apontar essas diferenças desde o começo.
+:::
+
+**Quando escolher cada um.**
+
+* **Só você, no seu computador, um programa por vez** (estudo, protótipo, análise): SQLite. É o caso da maior parte deste curso até o P3.
+* **Vários usuários ou programas ao mesmo tempo, ou acesso pela rede** (equipe, site, API): servidor.
+* **Dados espaciais com consultas geométricas pesadas**: PostgreSQL com a extensão PostGIS (Parte P3).
+* **Arquivo para entregar a um colega**: SQLite (ou GeoPackage), porque ele é um arquivo só.
+* **Dúvida?** Regra prática: comece em SQLite; o SQL que você aprende serve nos dois, e a troca para um servidor costuma ser decidida quando aparece o segundo usuário.
+
+**Onde isso volta no curso.** P1-06 a P1-08 ensinam SQL de forma sistemática em SQLite; o P3-01 aprofunda a modelagem, o P3-02 leva o SQL a dados espaciais (o PostgreSQL com PostGIS é o servidor que aparece na Parte P3), o P3-07 coloca uma **API** entre o usuário e o banco (a "atendente" de verdade de um aplicativo) e o P3-12 monta o aplicativo completo. Um programa Python conversa com um servidor PostgreSQL por meio de um pacote cliente (por exemplo, o `psycopg`), que faz o papel da nossa função `pedir`; o módulo `sqlite3`, da biblioteca padrão, só fala com arquivos SQLite.
+
+**Limites.** O servidor de brinquedo foi executado **só no Linux** (30 execuções seguidas, sem falha); **no Windows ainda não**: as dúvidas são o aviso de firewall, o nome do erro depois do desligamento e a remoção da pasta temporária. A sessão com o PostgreSQL é um **registro** (uma execução, em Linux), que o livro não repete; a instalação do PostgreSQL e do `psql` num Windows **não foi testada** e ainda não está escrita (virá no primeiro módulo da Parte P3 que o exigir).
 
 ### O ambiente virtual {#sec-s0-venv}
 
@@ -855,6 +1155,8 @@ Cada vez que a sessão de estudo começa com `git status -sb` limpo e `git pull`
 10. **README que não diz como rodar nem como testar.** Quem chega ao repositório (inclusive você, daqui a um ano) não sabe por onde começar.
 11. **Colar um segredo ao pedir ajuda.** Terminais copiados às vezes têm um *token* ou uma senha na saída. Releia antes de colar num issue, que é **público** em repositório público (@sec-s1-erros, item 6).
 12. **Pasta de projetos dentro do OneDrive.** Sincronizadores e Git não combinam bem; prefira uma pasta fora dele (recomendação comum, não testada aqui).
+13. **Culpar o banco quando é o servidor.** `Connection refused` quase sempre quer dizer que o servidor não está ligado, ou que host e porta estão errados; `password authentication failed` é senha ou usuário. Confira nesta ordem: o servidor está rodando? host e porta certos? usuário e senha certos? o usuário tem permissão? (@sec-s0-servidor)
+14. **Abrir o mesmo arquivo SQLite, ao mesmo tempo, em pasta de rede ou de nuvem compartilhada.** O travamento de arquivos falha em muitas implementações de rede e o banco pode corromper (sqlite.org). Vários usuários pedem um servidor.
 
 ## Exercícios {#sec-s0-exercicios}
 
@@ -1037,6 +1339,42 @@ assert com_zero == 5.0
 Resultado: só **E01** passa de 10 mm (média 14,0). Como o filtro é sobre uma **média**, ele vai em `HAVING` (depois do agrupamento), não em `WHERE`. Para E02, tratar o `NULL` como zero (`COALESCE(mm, 0)`) daria **5,0**, abaixo dos 7,5 corretos: a medição que faltou não é "zero chuva", é "não sabemos", e inventar um zero puxa a média para baixo.
 :::
 
+**Exercício 7 (servidor).** (a) Abra duas conexões `sqlite3.connect(":memory:")`, crie uma tabela numa delas e tente consultá-la na outra: o que acontece e por quê? (b) Com as funções da @sec-s0-servidor, ligue um servidor novo (arquivo numa pasta temporária), grave as seis medições como `aluno` e mais uma (E01, 2024-01-04, 18,0) e peça, como `leitor`, a média de E01. Qual é o valor, e por que o `leitor`, que nunca gravou nada, enxerga o dado? Desligue o servidor no fim.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 7
+```python
+# (a) cada ":memory:" é um banco separado e privado
+b1 = sqlite3.connect(":memory:")
+b2 = sqlite3.connect(":memory:")
+b1.execute("CREATE TABLE teste (x)")
+try:
+    b2.execute("SELECT * FROM teste")
+    bancos_separados = False
+except sqlite3.OperationalError as erro:
+    print(erro)
+    bancos_separados = True
+assert bancos_separados
+b1.close()
+b2.close()
+
+# (b) um grava, o outro enxerga: o dado mora no arquivo do servidor
+pasta_ex7 = tempfile.TemporaryDirectory()
+servidor7, porta7 = iniciar(Path(pasta_ex7.name) / "ambiental.db")
+pedir(porta7, *aluno, "CREATE TABLE chuva (estacao TEXT, dia TEXT, mm REAL)")
+for linha in medicoes + [("E01", "2024-01-04", 18.0)]:
+    pedir(porta7, *aluno, "INSERT INTO chuva VALUES (?, ?, ?)", linha)
+resposta = pedir(porta7, *leitor, "SELECT AVG(mm) FROM chuva WHERE estacao = ?", ("E01",))
+media_vista_pelo_leitor = resposta["linhas"][0][0]
+print(media_vista_pelo_leitor)
+assert media_vista_pelo_leitor == 15.0
+servidor7.shutdown()
+servidor7.server_close()
+pasta_ex7.cleanup()
+```
+Resultado: (a) `no such table: teste`. Cada `:memory:` é um banco **separado** e privado, que some quando a conexão fecha; dois programas (ou duas conexões) não compartilham nada. (b) **15,0**, que é (12 + 0 + 30 + 18) / 4. O dado mora no **arquivo do servidor**, não em quem o gravou: todos os clientes falam com o mesmo servidor, que decide o que cada um pode fazer (o `leitor` só consulta). Esse é o ganho de um servidor sobre um banco que só existe dentro de um programa.
+:::
+
 **Desafio (onde estou?).** Escreva `dentro_de_repositorio(laboratorio)`, que diz se a pasta atual do laboratório está dentro de um repositório Git, **sem** deixar o erro aparecer. Dica: `git rev-parse --is-inside-work-tree` responde `true` dentro de um repositório.
 
 ::: {.callout-tip collapse="true"}
@@ -1088,8 +1426,8 @@ Registre no Notion o *Nível atual* de P0-00 e uma linha sobre o que travou.
 
 | Nível | Você consegue... |
 |:--|:--|
-| **1 · Reconheço** | Dizer se um termo (commit, push, issue, pull request, Actions, venv, docstring) é do Git, do GitHub, do editor ou do Python; ler o cabeçalho de `git status -sb`; dizer o que são tabela, linha, coluna e `NULL`. |
-| **2 · Explico** | Explicar a diferença entre Git e GitHub; por que o commit não envia nada; por que o clone do livro deve ser só de leitura; o que cada lugar de documentação responde (README, docstring, comentário, commit, CHANGELOG, issue); por que o SQL ignora o `NULL` na média e por que o valor entra por parâmetro (`?`). |
+| **1 · Reconheço** | Dizer se um termo (commit, push, issue, pull request, Actions, venv, docstring) é do Git, do GitHub, do editor ou do Python; ler o cabeçalho de `git status -sb`; dizer o que são tabela, linha, coluna e `NULL`; apontar, numa URI como `postgresql://aluno@localhost:5432/ambiental`, o usuário, o host, a porta e o banco. |
+| **2 · Explico** | Explicar a diferença entre Git e GitHub; por que o commit não envia nada; por que o clone do livro deve ser só de leitura; o que cada lugar de documentação responde (README, docstring, comentário, commit, CHANGELOG, issue); por que o SQL ignora o `NULL` na média e por que o valor entra por parâmetro (`?`); explicar, com a analogia do caderno e da secretaria, a diferença entre banco em arquivo e em servidor, e por que `Connection refused` não é defeito do banco. |
 | **3 · Executo** | Abrir o terminal na pasta certa, rodar o projeto e os testes, atualizar o clone, criar e ativar um ambiente virtual, e seguir a rotina de nove passos sem consultar o capítulo. |
 | **4 · Ensino** | Montar uma aula de 30 minutos para quem nunca viu Git, usando a @fig-s0-mapa e o passeio pelo repositório, com um exercício de previsão cujo gabarito foi conferido no laboratório. |
 
@@ -1100,5 +1438,6 @@ Registre no Notion o *Nível atual* de P0-00 e uma linha sobre o que travou.
 * **Pro Git**, de Scott Chacon e Ben Straub, gratuito em git-scm.com/book (há tradução em português).
 * **Python:** o tutorial oficial sobre ambientes virtuais (docs.python.org/pt-br/3/tutorial/venv.html), o PEP 8 (estilo) e o PEP 257 (docstrings), em peps.python.org.
 * **VS Code:** a documentação em code.visualstudio.com/docs, em especial *Python in Visual Studio Code*. As extensões *Python* e *Quarto* ajudam, e o painel *Source Control* mostra o Git sem terminal.
+* **Bancos de dados:** a página *Appropriate Uses For SQLite* (sqlite.org/whentouse.html) diz quando o SQLite serve e quando um servidor é melhor; o *Tutorial* da documentação do PostgreSQL (postgresql.org/docs/16/tutorial.html) e a seção *Connection URIs* (postgresql.org/docs/16/libpq-connect.html) ajudam a seguir para o servidor.
 * **Escrever bem para quem programa:** *Keep a Changelog* (keepachangelog.com/pt-BR) e o guia *Write the Docs* (writethedocs.org/guide).
 * **Licenças:** choosealicense.com compara as mais comuns para software; para textos (como o deste livro), há o seletor do Creative Commons em creativecommons.org/choose.

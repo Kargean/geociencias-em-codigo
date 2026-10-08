@@ -29,7 +29,7 @@ O CSV serve para guardar e trocar dados. Mas ele **não impede** nada: aceita `-
 * **consultas** em uma linguagem declarativa, o **SQL**: você descreve *o que* quer, e o banco decide *como* buscar;
 * **desempenho** com índices, quando os dados crescem.
 
-Usamos o **SQLite**: um banco inteiro dentro de **um arquivo**, sem servidor para instalar, que já vem com o Python (módulo `sqlite3`). É o banco mais usado do mundo em aplicativos e serve muito bem a estudos e projetos individuais. Bancos de servidor (PostgreSQL com PostGIS, no P3) usam um SQL **muito parecido**, com mais recursos; os dialetos diferem em detalhes (por exemplo, as funções de data, como `strftime` e `julianday`, são do SQLite).
+Usamos o **SQLite**: um banco inteiro dentro de **um arquivo**, sem servidor para instalar, que já vem com o Python (módulo `sqlite3`). É o banco mais usado do mundo em aplicativos e serve muito bem a estudos e projetos individuais. Bancos de servidor (PostgreSQL com PostGIS, no P3; veja a @sec-s0-servidor) usam um SQL **muito parecido**, com mais recursos; os dialetos diferem em detalhes (por exemplo, as funções de data, como `strftime` e `julianday`, são do SQLite).
 
 Primeiro, a versão que você tem. As janelas deste capítulo precisam de SQLite 3.28 ou mais novo:
 
@@ -655,7 +655,7 @@ Registre no Notion o *Nível atual* do módulo P0-00 como um todo e a data da pr
 
 ## Para ir além {#sec-s4-alem}
 
-* **SQL de forma sistemática:** os módulos P1-06 a P1-08 (SQL essencial I a III) ensinam `SELECT`, `NULL`, `GROUP BY`, `JOIN`, subconsultas, restrições e o `sqlite3` do Python, passo a passo; o P3-11 junta tudo num aplicativo com banco de dados.
+* **SQL de forma sistemática:** os módulos P1-06 a P1-08 (SQL essencial I a III) ensinam `SELECT`, `NULL`, `GROUP BY`, `JOIN`, subconsultas, restrições e o `sqlite3` do Python, passo a passo; o P3-12 junta tudo num aplicativo com banco de dados.
 * **DuckDB:** banco analítico em um arquivo, com SQL muito parecido e leitura direta de CSV e Parquet; o próximo passo natural quando os dados crescem (módulo P3-01).
 * **SQL espacial:** SpatiaLite (SQLite) e PostGIS (PostgreSQL) acrescentam geometrias e consultas como "estações a menos de 10 km do rio" (P3).
 * **pytest:** executa os testes `unittest` deste projeto sem alterações e permite escrever com `assert` simples (P1-03).

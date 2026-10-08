@@ -11,6 +11,7 @@ O que este arquivo garante:
   6. os comandos `gh` e as opções citadas nos capítulos existem na versão instalada (se `gh` estiver instalado);
   7. as afirmações sobre "mutações que sobrevivem" são verdadeiras.
 """
+import builtins
 import contextlib
 import io
 import os
@@ -132,6 +133,50 @@ class Capitulos(unittest.TestCase):
         self.assertTrue((RAIZ / "projeto_chuva" / "sql" / "esquema.sql").is_file())
         texto = ler("p0-00-semana0-alicerce.qmd")
         self.assertIn("P1-06 a P1-08", texto)
+
+    def test_semana0_servidores_numeros_citados(self):
+        ns, saida = self.ns["p0-00-semana0-alicerce.qmd"], self.saida["p0-00-semana0-alicerce.qmd"]
+        texto = ler("p0-00-semana0-alicerce.qmd")
+        # o servidor de brinquedo devolve a mesma resposta do SQL local (E01 14,0; E02 7,5, NULL ignorado)
+        self.assertEqual(ns["medias"], [["E01", 3, 14.0], ["E02", 2, 7.5]])
+        self.assertIn("servidor e SQL local concordam: True", saida)
+        # escuta só nesta máquina, numa porta escolhida pelo sistema (a porta muda; o endereço não)
+        self.assertEqual(ns["servidor"].server_address[0], "127.0.0.1")
+        self.assertIsInstance(ns["porta"], int)
+        self.assertGreater(ns["porta"], 0)
+        # autenticação e permissão: o leitor lê as 6 linhas, não escreve; senha errada nem executa
+        self.assertEqual(ns["leitura_do_leitor"], 6)
+        self.assertFalse(ns["tentativa_do_leitor"]["ok"])
+        self.assertIn("readonly", ns["tentativa_do_leitor"]["erro"])
+        self.assertEqual(ns["senha_errada"], {"ok": False, "erro": "autenticação falhou"})
+        # quatro clientes ao mesmo tempo: 6 + 4 linhas, nenhuma perdida
+        self.assertEqual(ns["total_de_linhas"], 10)
+        # depois do desligamento a conexão é recusada (no Linux, ConnectionRefusedError; qualquer OSError no resto)
+        self.assertTrue(issubclass(getattr(builtins, ns["nome_do_erro"]), OSError))
+        self.assertIn("servidor desligado:", saida)
+        # a pasta temporária foi removida
+        self.assertFalse(ns["arquivo_do_banco"].exists())
+        # gabarito do exercício 7: duas conexões em memória são bancos separados; o leitor enxerga o que o aluno gravou
+        self.assertTrue(ns["bancos_separados"])
+        self.assertEqual(ns["media_vista_pelo_leitor"], (12 + 0 + 30 + 18) / 4)
+        self.assertEqual(ns["media_vista_pelo_leitor"], 15.0)
+        # o registro estático do PostgreSQL não é executado: confere o que o texto cita contra o SQLite do capítulo
+        registro = re.search(r"```text\n(\$ psql.*?)```", texto, re.S).group(1)
+        tabela = re.findall(r"(E0\d)\s+\|\s+(\d+)\s+\|\s+([\d.]+)", registro)
+        self.assertEqual([(e, int(n), float(m)) for e, n, m in tabela], ns["resultado_sql"])
+        for trecho in (
+            "postgresql://aluno@localhost:5432/ambiental",
+            "function round(double precision, integer) does not exist",
+            "ROUND(AVG(mm)::numeric, 1)",
+            "permission denied for table chuva",
+            "password authentication failed",
+            "Connection refused",
+        ):
+            self.assertIn(trecho, registro)
+        self.assertIn("PostgreSQL 16.15", texto)
+        self.assertIn("(30 execuções seguidas, sem falha)", texto)
+        self.assertIn("P3-12", texto)
+        self.assertNotIn("P3-11", texto)
 
     def test_semana0_blocos_bash_nao_usam_a_continuacao_do_powershell(self):
         # os blocos `bash` são para o Git Bash (continuação com \\); o acento grave pertence aos blocos `powershell`
