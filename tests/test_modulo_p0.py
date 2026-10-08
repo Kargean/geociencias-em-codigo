@@ -113,6 +113,26 @@ class Capitulos(unittest.TestCase):
         self.assertEqual(ns["conferir_docstring"](ns["mm_para_litros"]), (0, 1))
         self.assertEqual(ns["nome_seguro"]("Relatório FINAL (v2).docx"), "relatorio_final_v2.docx")
 
+    def test_semana0_sql_numeros_citados(self):
+        ns, saida = self.ns["p0-00-semana0-alicerce.qmd"], self.saida["p0-00-semana0-alicerce.qmd"]
+        # E02 tem três linhas, mas COUNT(mm) conta duas e a média é 7,5 (o SQL ignora o NULL); E01: 14,0
+        self.assertEqual(sum(1 for estacao, _dia, _mm in ns["medicoes"] if estacao == "E02"), 3)
+        self.assertEqual(ns["resultado_sql"], [("E01", 3, 14.0), ("E02", 2, 7.5)])
+        self.assertEqual(ns["resultado_sql"], ns["resultado_py"])
+        self.assertIn("SQL e Python concordam: True", saida)
+        # injeção: colando o texto devolve as seis linhas; com parâmetro, zero
+        self.assertEqual(len(ns["medicoes"]), 6)
+        self.assertEqual((ns["colando"], ns["com_parametro"]), (6, 0))
+        # o esquema real do projeto cria as duas tabelas citadas pelo texto
+        self.assertEqual(ns["tabelas"], ["chuva_diaria", "estacao"])
+        # gabarito do exercício 6: só E01 passa de 10 mm; com o ausente tratado como zero, E02 daria 5,0
+        self.assertEqual(ns["acima"], [("E01", 14.0)])
+        self.assertEqual(ns["com_zero"], 5.0)
+        # o texto menciona o arquivo que existe e os módulos de SQL do roteiro
+        self.assertTrue((RAIZ / "projeto_chuva" / "sql" / "esquema.sql").is_file())
+        texto = ler("p0-00-semana0-alicerce.qmd")
+        self.assertIn("P1-06 a P1-08", texto)
+
     def test_semana0_blocos_bash_nao_usam_a_continuacao_do_powershell(self):
         # os blocos `bash` são para o Git Bash (continuação com \\); o acento grave pertence aos blocos `powershell`
         texto = ler("p0-00-semana0-alicerce.qmd")

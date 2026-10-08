@@ -11,7 +11,8 @@
 2. distinguir as peças do seu ambiente (navegador, editor, terminal, pasta do projeto, Python) e saber qual usar em cada tarefa;
 3. rodar os exemplos do livro de quatro maneiras, da mais simples (ler) à mais completa (renderizar o livro), mantendo o **seu** trabalho separado do livro;
 4. escolher, para cada informação, o lugar certo onde escrevê-la: comentário, docstring, mensagem de commit, README, CHANGELOG, issue ou teste;
-5. seguir uma rotina curta a cada sessão de estudo (atualizar, trabalhar, conferir, gravar, enviar) e reconhecer os primeiros erros típicos.
+5. seguir uma rotina curta a cada sessão de estudo (atualizar, trabalhar, conferir, gravar, enviar) e reconhecer os primeiros erros típicos;
+6. dizer o que é um banco de dados relacional e o que é SQL, e onde rodar uma consulta (só o essencial: o estudo sistemático de SQL vem nos módulos P1-06 a P1-08).
 
 **Pré-requisitos:** nenhum. Este capítulo parte do zero. Se Git, Python e a CLI `gh` ainda não estão instalados, comece pela @sec-instalar. O VS Code (editor gratuito) é recomendado, mas não obrigatório.
 
@@ -610,6 +611,95 @@ python tools/executar_codigo_qmd.py p0-00-semana0-alicerce.qmd --gabaritos
 
 **Como experimentar um bloco do livro** sem estragar nada: copie o bloco para um arquivo seu (por exemplo, `experimento.py`, dentro do **seu** repositório), rode com `python experimento.py` e mude **um valor por vez**, prevendo o resultado antes de rodar. Isso funciona para blocos que só usam Python (como o da função `volume_de_chuva_m3`); os que leem arquivos do livro (`projeto_chuva/...`, `.github/...`) ou usam o laboratório precisam ser rodados a partir da pasta do livro. No VS Code, selecionar linhas e apertar `Shift+Enter` as executa no terminal do Python.
 
+### E o SQL? Onde rodar as consultas {#sec-s0-sql}
+
+No curso, **SQL é alicerce do mesmo tamanho que Python**: ele tem módulos próprios (P1-06 a P1-08, logo depois do pandas), é aprofundado no P3-01 e no P3-02 e é o coração do aplicativo com banco de dados do P3-11. Aqui vai só o mapa mínimo, para você saber o que é e onde rodar. A Semana 4 deste módulo dá uma primeira volta aplicada.
+
+**O que é.** Um banco de dados relacional guarda dados em **tabelas**. Cada **linha** é um registro (uma medição) e cada **coluna** é um atributo (estação, dia, chuva em mm). **SQL** é a linguagem para perguntar e alterar: você descreve **o que** quer e o banco decide **como** buscar. O **SQLite** é um banco inteiro dentro de **um arquivo**, sem servidor para instalar, e já vem com o Python (módulo `sqlite3`).
+
+| Onde rodar SQL | Como | O que precisa | Testado para este capítulo? |
+|:--|:--|:--|:--|
+| **Dentro do Python** | `import sqlite3` e `banco.execute("SELECT ...")` | só o Python | **sim**, no Linux (o bloco abaixo e a Semana 4) |
+| **DB Browser for SQLite** | programa gratuito: abre um arquivo `.db`, mostra as tabelas e roda SQL numa janela | instalar o programa | não |
+| **Terminal** | `sqlite3 arquivo.db` abre um prompt de SQL | o programa `sqlite3`, que no Windows nem sempre vem instalado | não |
+| **VS Code** | extensões que abrem arquivos `.db` | instalar uma extensão | não |
+
+O caminho **dentro do Python** é o que o livro usa, porque ele roda igual em qualquer sistema e permite conferir cada resposta do SQL contra um cálculo em Python (regra do método). Um exemplo pequeno: seis medições de chuva em duas estações, **uma delas ausente** (`None` no Python, `NULL` no SQL).
+
+```{python}
+#| label: s0-sql
+#| code-fold: true
+#| code-summary: "Ver o código"
+import sqlite3
+
+medicoes = [  # (estação, dia, chuva em mm); None = medição que faltou
+    ("E01", "2024-01-01", 12.0),
+    ("E01", "2024-01-02", 0.0),
+    ("E01", "2024-01-03", 30.0),
+    ("E02", "2024-01-01", 5.0),
+    ("E02", "2024-01-02", None),
+    ("E02", "2024-01-03", 10.0),
+]
+banco = sqlite3.connect(":memory:")  # banco só na memória: some quando o programa termina
+banco.execute("CREATE TABLE chuva (estacao TEXT, dia TEXT, mm REAL)")
+banco.executemany("INSERT INTO chuva VALUES (?, ?, ?)", medicoes)
+
+consulta = """
+SELECT estacao, COUNT(mm) AS dias_medidos, ROUND(AVG(mm), 1) AS media_mm
+FROM chuva
+GROUP BY estacao
+ORDER BY estacao
+"""
+resultado_sql = banco.execute(consulta).fetchall()
+for linha in resultado_sql:
+    print(linha)
+
+# a mesma conta em Python puro, para conferir o SQL
+por_estacao = {}
+for estacao, _dia, mm in medicoes:
+    por_estacao.setdefault(estacao, []).append(mm)
+resultado_py = []
+for estacao in sorted(por_estacao):
+    medidos = [mm for mm in por_estacao[estacao] if mm is not None]
+    resultado_py.append((estacao, len(medidos), round(sum(medidos) / len(medidos), 1)))
+print("SQL e Python concordam:", resultado_sql == resultado_py)
+```
+
+Duas coisas para notar. A estação E02 tem **três** linhas, mas `COUNT(mm)` contou **duas**, e a média saiu **7,5** e não 5,0: o SQL **ignora** o `NULL` em vez de tratá-lo como zero (tratar a medição que faltou como zero derrubaria a média). Esse é um dos motivos pelos quais o módulo P1-06 ensina `NULL` com cuidado.
+
+A segunda lição é de **segurança**: nunca monte uma consulta colando texto. O bloco abaixo procura uma estação cujo nome foi digitado de má-fé (`E01' OR '1'='1`) das duas maneiras:
+
+```{python}
+#| label: s0-sql-injecao
+#| code-fold: true
+#| code-summary: "Ver o código"
+nome = "E01' OR '1'='1"  # texto malicioso, como alguém poderia digitar num formulário
+
+colando = banco.execute(f"SELECT COUNT(*) FROM chuva WHERE estacao = '{nome}'").fetchone()[0]
+com_parametro = banco.execute("SELECT COUNT(*) FROM chuva WHERE estacao = ?", (nome,)).fetchone()[0]
+print("colando o texto:", colando, "linhas | com parâmetro (?):", com_parametro, "linhas")
+```
+
+Colando o texto, o `OR '1'='1'` virou parte da consulta e ela devolveu **todas** as seis linhas, para uma estação que não existe; com o parâmetro `?`, o texto é tratado só como texto e a resposta é **zero**. Isso se chama *injeção de SQL* e é um dos erros de segurança mais antigos e mais comuns. A regra, desde o primeiro dia: **valores entram por parâmetro (`?`), nunca por colagem de texto**.
+
+Por fim, um arquivo `.sql` (como o `projeto_chuva/sql/esquema.sql`) é só texto com comandos; o Python o executa de uma vez com `executescript`:
+
+```{python}
+#| label: s0-sql-arquivo
+#| code-fold: true
+#| code-summary: "Ver o código"
+from pathlib import Path
+
+esquema = Path("projeto_chuva/sql/esquema.sql").read_text(encoding="utf-8")
+banco_do_projeto = sqlite3.connect(":memory:")
+banco_do_projeto.executescript(esquema)
+tabelas = [linha[0] for linha in banco_do_projeto.execute(
+    "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")]
+print("tabelas criadas pelo esquema.sql:", tabelas)
+```
+
+**Limites.** Só o caminho "dentro do Python" foi executado, e no Linux; o DB Browser, o comando `sqlite3` e as extensões do VS Code **não foram testados**, e o bloco acima ainda não rodou no Windows (o teste automático do Windows só roda o projeto de chuva). Se algo falhar aí, abra um issue com a mensagem de erro completa (@sec-ajuda).
+
 ### O ambiente virtual {#sec-s0-venv}
 
 Cada projeto usa pacotes (bibliotecas) de versões específicas, e projetos diferentes podem pedir versões diferentes. Instalar tudo no Python do sistema mistura tudo e, cedo ou tarde, leva ao "funcionava ontem". O **ambiente virtual** (*venv*) é uma pasta (`.venv`) com um Python e um conjunto de pacotes **só deste projeto**. O arquivo `requirements.txt` é a receita: lista os pacotes que o projeto precisa.
@@ -768,7 +858,7 @@ Cada vez que a sessão de estudo começa com `git status -sb` limpo e `git pull`
 
 ## Exercícios {#sec-s0-exercicios}
 
-Os gabaritos rodam no laboratório do livro e no Python, **a partir da pasta do livro** (alguns leem `projeto_chuva/` e `.github/`). Os exercícios 3 a 5 e o desafio usam um pouco mais de Python (funções, texto, expressões regulares): se ainda não se sente à vontade, faça o 1 e o 2 agora e volte a eles depois da Semana 2.
+Os gabaritos rodam no laboratório do livro e no Python, **a partir da pasta do livro** (alguns leem `projeto_chuva/` e `.github/`). Os exercícios 3 a 6 e o desafio usam um pouco mais de Python (funções, texto, expressões regulares): se ainda não se sente à vontade, faça o 1 e o 2 agora e volte a eles depois da Semana 2.
 
 **Exercício 1 (o passeio).** Responda às cinco perguntas do quadro *Faça agora* da @sec-s0-passeio, olhando o site.
 
@@ -926,6 +1016,27 @@ assert perguntas_sem_resposta(esqueleto) == []
 Resultado: o README do projeto de chuva não tem um título para "como testar" (o comando existe, mas dentro de "Como rodar") nem para licença ou citação. O verificador olha só os títulos, então ele aponta onde **procurar**, não decide sozinho: o autor avalia se vale criar a seção. O esqueleto da @sec-s0-readme passa.
 :::
 
+**Exercício 6 (SQL).** Na tabela `chuva` do exemplo da @sec-s0-sql (use a conexão `banco` criada lá), escreva a consulta que devolve as estações cuja chuva média passa de 10 mm. Depois diga qual seria a média de E02 se a medição que faltou fosse tratada como **zero** e por que isso seria um erro.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 6
+```python
+acima = banco.execute(
+    "SELECT estacao, ROUND(AVG(mm), 1) FROM chuva GROUP BY estacao HAVING AVG(mm) > 10 ORDER BY estacao"
+).fetchall()
+print(acima)
+assert acima == [("E01", 14.0)]
+
+# E02 com a medição ausente tratada como zero
+com_zero = banco.execute(
+    "SELECT ROUND(AVG(COALESCE(mm, 0)), 1) FROM chuva WHERE estacao = 'E02'"
+).fetchone()[0]
+print(com_zero)
+assert com_zero == 5.0
+```
+Resultado: só **E01** passa de 10 mm (média 14,0). Como o filtro é sobre uma **média**, ele vai em `HAVING` (depois do agrupamento), não em `WHERE`. Para E02, tratar o `NULL` como zero (`COALESCE(mm, 0)`) daria **5,0**, abaixo dos 7,5 corretos: a medição que faltou não é "zero chuva", é "não sabemos", e inventar um zero puxa a média para baixo.
+:::
+
 **Desafio (onde estou?).** Escreva `dentro_de_repositorio(laboratorio)`, que diz se a pasta atual do laboratório está dentro de um repositório Git, **sem** deixar o erro aparecer. Dica: `git rev-parse --is-inside-work-tree` responde `true` dentro de um repositório.
 
 ::: {.callout-tip collapse="true"}
@@ -977,8 +1088,8 @@ Registre no Notion o *Nível atual* de P0-00 e uma linha sobre o que travou.
 
 | Nível | Você consegue... |
 |:--|:--|
-| **1 · Reconheço** | Dizer se um termo (commit, push, issue, pull request, Actions, venv, docstring) é do Git, do GitHub, do editor ou do Python; ler o cabeçalho de `git status -sb`. |
-| **2 · Explico** | Explicar a diferença entre Git e GitHub; por que o commit não envia nada; por que o clone do livro deve ser só de leitura; o que cada lugar de documentação responde (README, docstring, comentário, commit, CHANGELOG, issue). |
+| **1 · Reconheço** | Dizer se um termo (commit, push, issue, pull request, Actions, venv, docstring) é do Git, do GitHub, do editor ou do Python; ler o cabeçalho de `git status -sb`; dizer o que são tabela, linha, coluna e `NULL`. |
+| **2 · Explico** | Explicar a diferença entre Git e GitHub; por que o commit não envia nada; por que o clone do livro deve ser só de leitura; o que cada lugar de documentação responde (README, docstring, comentário, commit, CHANGELOG, issue); por que o SQL ignora o `NULL` na média e por que o valor entra por parâmetro (`?`). |
 | **3 · Executo** | Abrir o terminal na pasta certa, rodar o projeto e os testes, atualizar o clone, criar e ativar um ambiente virtual, e seguir a rotina de nove passos sem consultar o capítulo. |
 | **4 · Ensino** | Montar uma aula de 30 minutos para quem nunca viu Git, usando a @fig-s0-mapa e o passeio pelo repositório, com um exercício de previsão cujo gabarito foi conferido no laboratório. |
 
