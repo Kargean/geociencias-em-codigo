@@ -447,9 +447,9 @@ print("\n".join(Path("CHANGELOG.md").read_text(encoding="utf-8").splitlines()[:1
 
 Quando o conjunto está bom, você transforma o estado atual numa **versão** com nome. Os passos, no repositório de treino:
 
-1. `git switch main && git pull`, e confira que os testes estão verdes;
+1. `git switch main` e depois `git pull` (dois comandos, um por linha: o `&&` não existe no Windows PowerShell 5.1), e confira que os testes estão verdes;
 2. **por pull request** (a `main` está protegida desde a Semana 3), no `CHANGELOG.md`: troque o título *Não lançado* por `[0.1.0] - AAAA-MM-DD` e abra uma nova seção *Não lançado* acima. Junte o PR depois que os testes ficarem verdes;
-3. volte para a `main` **atualizada** (`git switch main && git pull`, para trazer o commit do `CHANGELOG`) e crie a tag anotada sobre esse commit; depois envie-a:
+3. volte para a `main` **atualizada** (`git switch main` e `git pull`, para trazer o commit do `CHANGELOG`) e crie a tag anotada sobre esse commit; depois envie-a:
 
 ```bash
 git tag -a v0.1.0 -m "Primeira versão: limpeza, índices, SQL e testes"
