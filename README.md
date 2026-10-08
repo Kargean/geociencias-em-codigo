@@ -4,7 +4,7 @@ Livro-laboratório em **Quarto** (HTML publicado no GitHub Pages) sobre geoproce
 
 **Foco:** a pilha de ferramentas da análise e modelagem ambiental (Python, dados, GIS, sensoriamento remoto e PDI, estatística, aprendizado de máquina, bancos de dados, APIs e interfaces), do básico ao avançado; hidrologia, hidrogeologia, geoquímica, geotecnia, estrutural e oceanografia entram como aplicações.
 
-**Estado:** estão escritos o **módulo de partida P0-00** (Git e GitHub, Python, SQL e testes, em seis capítulos: visão geral e Semanas 0 a 4), o primeiro capítulo de SQL (**P1-06, SQL essencial I**) e um capítulo de exemplo (*Atitudes e projeção estereográfica*, módulo P9-06). O resto do mapa (partes P0 a P11, ver `index.qmd`) será produzido semana a semana, a partir de P1.
+**Estado:** estão escritos o **módulo de partida P0-00** (Git e GitHub, Python, SQL e testes, em seis capítulos: visão geral e Semanas 0 a 4), os dois primeiros capítulos de SQL (**P1-06, SQL essencial I**, e **P1-07, SQL essencial II**) e um capítulo de exemplo (*Atitudes e projeção estereográfica*, módulo P9-06). O resto do mapa (partes P0 a P11, ver `index.qmd`) será produzido semana a semana, a partir de P1.
 
 ## O que há aqui
 
@@ -13,6 +13,7 @@ _quarto.yml                  configuração do livro (capítulos, tema, idioma)
 index.qmd                    apresentação e mapa do livro
 p0-00-*.qmd                  módulo de partida P0-00: visão geral e Semanas 0 a 4
 p1-06-sql-essencial-i.qmd    P1-06: banco relacional, tabelas e consultas simples (SQLite)
+p1-07-sql-essencial-ii.qmd   P1-07: agregação, GROUP BY, HAVING, chaves e JOIN (SQLite; compara com o pandas)
 cap-estrutural-atitudes.qmd  capítulo de exemplo (texto + código + figura interativa)
 projeto_chuva/               projeto de referência do P0-00 (Python, SQL e testes; só biblioteca padrão)
 references.bib               bibliografia
@@ -48,7 +49,7 @@ pip install -r requirements.txt     # uma vez
 python tests/test_estrutural.py     # a matemática confere?
 python tests/test_capitulo.py       # os números do texto conferem?
 python tests/test_modulo_p0.py      # módulo P0-00: capítulos, números citados, configuração do GitHub
-python tests/test_modulo_p1.py      # P1-06 (SQL essencial I): capítulo, números citados, respostas do SQL contra Python
+python tests/test_modulo_p1.py      # P1-06 e P1-07 (SQL): capítulos, números citados, respostas do SQL contra Python e pandas
 cd projeto_chuva                    # testes do projeto de chuva: entre na pasta,
 python -m unittest discover -s tests -v
 cd ..                               # e volte para a raiz do livro
@@ -69,7 +70,7 @@ O Quarto se instala à parte (quarto.org). Sem ele, ainda dá para: `python tool
 
 ## O que foi e o que NÃO foi testado
 
-**Testado:** a matemática do capítulo de exemplo (9 testes) e todos os números citados no texto dele (47 conferências); a execução ponta a ponta de todos os blocos de código dos seis capítulos do módulo P0-00, **inclusive os gabaritos** (`tests/test_modulo_p0.py`, 21 testes); o capítulo **P1-06** (SQL essencial I) de ponta a ponta, com os gabaritos, em Python 3.11, 3.12 e 3.13 (`tests/test_modulo_p1.py`, 19 testes; as figuras só foram desenhadas no 3.13); os 104 testes do projeto de chuva; os comandos de Git das Semanas 0, 1 e 3, **executados de verdade** num laboratório descartável (com um "GitHub de mentirinha" local); a validade dos arquivos de configuração do GitHub (YAML) e as opções de `gh` citadas, conferidas na ajuda da versão instalada; a figura interativa no Chromium; uma prévia estática dos capítulos; e, **no próprio GitHub** (primeiro `push`, 07/10/2026), o fluxo **Testes** em Python 3.11, 3.12 e 3.13 e o fluxo **Publicar livro** inteiro (testes do livro e do projeto de chuva, renderização do Quarto e publicação no Pages), todos verdes.
+**Testado:** a matemática do capítulo de exemplo (9 testes) e todos os números citados no texto dele (47 conferências); a execução ponta a ponta de todos os blocos de código dos seis capítulos do módulo P0-00, **inclusive os gabaritos** (`tests/test_modulo_p0.py`, 21 testes); o capítulo **P1-06** (SQL essencial I) de ponta a ponta, com os gabaritos, em Python 3.11, 3.12 e 3.13 (`tests/test_modulo_p1.py`, 42 testes no total; as figuras só foram desenhadas no 3.13); o capítulo **P1-07** (SQL essencial II) de ponta a ponta, com os gabaritos, no Python 3.13 com SQLite 3.45.1, pandas 3.0.5 e matplotlib 3.11.2 (e, sem as células do pandas e sem a figura, também no 3.11 e no 3.12), e as 27 consultas dele no PostgreSQL 16.15, com os mesmos números do SQLite; os 104 testes do projeto de chuva; os comandos de Git das Semanas 0, 1 e 3, **executados de verdade** num laboratório descartável (com um "GitHub de mentirinha" local); a validade dos arquivos de configuração do GitHub (YAML) e as opções de `gh` citadas, conferidas na ajuda da versão instalada; a figura interativa no Chromium; uma prévia estática dos capítulos; e, **no próprio GitHub** (primeiro `push`, 07/10/2026), o fluxo **Testes** em Python 3.11, 3.12 e 3.13 e o fluxo **Publicar livro** inteiro (testes do livro e do projeto de chuva, renderização do Quarto e publicação no Pages), todos verdes.
 
 **Não testado:**
 
@@ -80,7 +81,7 @@ O Quarto se instala à parte (quarto.org). Sem ele, ainda dá para: `python tool
 * **as ferramentas de SQL citadas na Semana 0 além do Python:** DB Browser for SQLite, o comando `sqlite3` do terminal e as extensões do VS Code (só o `sqlite3` do Python foi executado, no Linux);
 * **o servidor de brinquedo da Semana 0 no Windows** (aviso de firewall, nome do erro depois do desligamento, remoção da pasta temporária): no Linux rodou 30 vezes seguidas sem falha; e **o PostgreSQL**: a sessão do capítulo é o registro de uma execução (PostgreSQL 16.15, Linux, 08/10/2026), que o livro não repete, e instalar o PostgreSQL e o `psql` no Windows não foi testado;
 * **os passos do capítulo da Semana 0 que dependem do seu computador:** a instalação dos pacotes por `pip` em ambiente novo (o PyPI não era acessível na sessão de escrita; a lista de pacotes foi conferida pelos `import`), a ativação do ambiente virtual e o terminal integrado no Windows, o PowerShell 5.1 sem `&&`, a pasta sincronizada pelo OneDrive, e as abas do site do GitHub como estão hoje;
-* **o P1-06 no Windows e com outras versões do SQLite** (testado só com o SQLite 3.45.1, no Linux); o **registro do PostgreSQL 16.15** das diferenças de dialeto (08/10/2026), que o capítulo exibe mas não reexecuta; e se a CONAMA 410/2009 ou a 430/2011 mudaram os três limites usados (classe 2: OD ≥ 5 mg/L, pH de 6,0 a 9,0, turbidez ≤ 100 UNT), que **não foi conferido**;
+* **o P1-06 e o P1-07 no Windows e com outras versões do SQLite** (testado só com o SQLite 3.45.1, no Linux), e o **P1-07 com outras versões do pandas** (só a 3.0.5; o erro de uma gravação recusada em `to_sql` pode chegar com outro tipo em outras versões); o **registro do PostgreSQL 16.15** das diferenças de dialeto e das consultas do P1-07 (08/10/2026; roteiro em `tools/registro_postgresql_p1-07.sql`), que os capítulos exibem mas os testes não reexecutam; e se a CONAMA 410/2009 ou a 430/2011 mudaram os três limites usados (classe 2: OD ≥ 5 mg/L, pH de 6,0 a 9,0, turbidez ≤ 100 UNT), que **não foi conferido**;
 * `pytest`, `coverage`, `pre-commit` e `act`, citados só como próximos passos.
 
 ## Licença

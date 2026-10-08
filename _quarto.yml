@@ -24,6 +24,7 @@ book:
     - part: "P1 · Programação e dados tabulares"
       chapters:
         - p1-06-sql-essencial-i.qmd
+        - p1-07-sql-essencial-ii.qmd
     - part: "P9 · Solo e rocha: exemplo desenvolvido (estrutural)"
       chapters:
         - cap-estrutural-atitudes.qmd
