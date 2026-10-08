@@ -47,7 +47,7 @@ Uma planilha deixa você escrever qualquer coisa em qualquer célula: um "n/d" n
 
 **Uma medição por linha.** Em vez de uma coluna para cada parâmetro (`od`, `ph`, `turbidez`...), guardamos **ponto, data, parâmetro, valor e unidade** em cada linha. Esse formato (chamado *longo*) tem vantagens: um parâmetro novo não exige coluna nova; uma medição que faltou é só um `NULL` naquela linha; e filtrar por parâmetro é uma condição simples. O formato *largo* (uma coluna por parâmetro) é melhor para algumas contas e gráficos, e o pandas converte de um para o outro (P1-04 e P1-05).
 
-O SQLite é um banco inteiro dentro de **um arquivo** (ou, como aqui, na memória), sem servidor. Se você quer saber o que muda com um servidor, volte à @sec-s0-servidor.
+O SQLite é um banco inteiro dentro de **um arquivo** (ou, como aqui, na memória), sem servidor. Se você quer saber o que muda com um servidor, volte à @sec-s0-servidor. O **PostgreSQL**, que aparece neste capítulo só para comparar dialetos, é um banco de servidor.
 
 ## Convenções deste capítulo {#sec-p106-convencoes}
 
@@ -59,9 +59,9 @@ Antes de qualquer consulta, as regras do jogo (convenções declaradas, regra 4 
 | Valor ausente | `NULL` (no Python, `None`); **nunca** `0`, `-999` ou `"n/d"` | ausente não é zero (o `NULL` ganha uma seção inteira, a @sec-p106-null) |
 | Unidades | uma coluna `unidade`, em cada linha | o número sozinho não diz o que mede |
 | Nomes | minúsculas, sem acento nem espaço (`parametro`, `amostra`) | evita aspas e problemas entre sistemas |
-| Palavras do SQL | MAIÚSCULAS, uma cláusula por linha | só legibilidade: o SQL não exige |
+| Palavras do SQL | MAIÚSCULAS; nas consultas longas, uma cláusula por linha | só legibilidade: o SQL não exige |
 | Texto no SQL | aspas **simples** (`'OD'`); aspas duplas são para nomes | é o padrão do SQL e evita um erro silencioso (veja a @sec-p106-dialetos) |
-| Valores que vêm de variáveis | parâmetro `?`, nunca texto colado | segurança, como na @sec-s0-sql |
+| Valores que vêm de variáveis | parâmetro `?` (ou `:nome`), nunca texto colado; o `?` vale só para **valores**, não para nomes de tabela ou de coluna | segurança, como na @sec-s0-sql |
 | Limites legais | constantes nomeadas e comentadas, com a fonte | regra 6 do método |
 
 Por que o formato ISO? Porque o texto `2024-05-14` ordena por ordem alfabética **na mesma ordem do calendário**. Com o formato brasileiro, não:
@@ -89,9 +89,11 @@ print("SQLite", sqlite3.sqlite_version)
 
 ## Os dados: 20 amostras sintéticas {#sec-p106-dados}
 
-Para saber se uma resposta está certa, precisamos de dados cuja resposta conhecemos (regra 1 do método). Vamos inventar uma campanha de monitoramento: um rio com **três pontos** (P01, a montante de um lançamento de esgoto tratado; P02, a jusante dele; P03, num afluente) e **três campanhas** (fevereiro, maio e agosto de 2024), medindo **oxigênio dissolvido** (OD, em mg/L), **pH** (adimensional) e **turbidez** (em UNT, unidade nefelométrica de turbidez). **As medições são sintéticas: nenhum desses números foi medido em rio algum.** Uma amostra de turbidez de P02, em agosto, **não tem resultado** (o frasco foi perdido): é o nosso `NULL`.
+Para saber se uma resposta está certa, precisamos de dados cuja resposta conhecemos (regra 1 do método). Vamos inventar uma campanha de monitoramento: um rio com **três pontos** (P01, a montante de um lançamento de esgoto tratado; P02, a jusante dele; P03, num afluente) e **três campanhas** (fevereiro, maio e agosto de 2024), medindo **oxigênio dissolvido** (OD, em mg/L), **pH** (adimensional) e **turbidez** (em UNT, unidade nefelométrica de turbidez). **As medições são sintéticas: nenhum desses números foi medido em rio algum.** Uma amostra de turbidez de P02, em agosto, **não tem resultado** (o frasco dessa análise foi perdido): é o nosso `NULL`.
 
-Como referência para dizer se uma amostra "passa", usamos os limites da **classe 2** das águas doces da Resolução CONAMA nº 357, de 17 de março de 2005 (arts. 14 e 15): OD "em qualquer amostra, não inferior a 5 mg/L O2", turbidez "até 100 UNT" e pH "de 6,0 a 9,0". A classe 2 é a que vale enquanto o corpo de água não tem enquadramento aprovado (art. 42), e por isso é uma escolha natural para um exemplo. Fonte: texto da resolução na cópia da CETESB (licenciamento.cetesb.sp.gov.br/legislacao/federal/resolucoes/2005_Res_CONAMA_357.pdf), consultada em 08/10/2026. **Não conferi** se resoluções posteriores (como a 410/2009 e a 430/2011) mudaram esses três itens; confira a versão consolidada antes de usar estes números num trabalho real. Os limites ficam em constantes nomeadas (regra 6), nunca soltos no meio das consultas:
+Um cuidado com o vocabulário: aqui, cada **linha** da tabela `amostra` é um **resultado** (um parâmetro, num ponto e dia). Num laboratório de verdade, uma amostra (o frasco coletado) rende vários resultados; a modelagem com mais de uma tabela vem nos módulos seguintes. Por isso, "amostra sem resultado" é, a rigor, uma **análise de turbidez** que não tem valor.
+
+Como referência para dizer se uma amostra "passa", usamos os limites da **classe 2** das águas doces da Resolução CONAMA nº 357, de 17 de março de 2005 (arts. 14 e 15): OD "em qualquer amostra, não inferior a 5 mg/L O2", turbidez "até 100 UNT" e pH na faixa de 6,0 a 9,0. A classe 2 é a que vale enquanto o corpo de água não tem enquadramento aprovado (art. 42), e por isso é uma escolha natural para um exemplo. Fonte: texto da resolução na cópia da CETESB (licenciamento.cetesb.sp.gov.br/legislacao/federal/resolucoes/2005_Res_CONAMA_357.pdf), consultada em 08/10/2026. **Não conferi** se resoluções posteriores (como a 410/2009 e a 430/2011) mudaram esses três itens; confira a versão consolidada antes de usar estes números num trabalho real. Os limites ficam em constantes nomeadas (regra 6). Nas seções de `SELECT`, os números aparecem escritos dentro das consultas só para você lê-las melhor; na prática (@sec-p106-pratica), as consultas recebem as constantes por parâmetro:
 
 ```{python}
 #| label: p106-dados
@@ -149,7 +151,7 @@ print("tabelas no banco:", [linha[0] for linha in banco.execute("SELECT name FRO
 
 Linha por linha:
 
-* `id INTEGER PRIMARY KEY`: a chave primária. No SQLite, uma coluna `INTEGER PRIMARY KEY` é numerada sozinha (1, 2, 3...) quando você não informa o valor.
+* `id INTEGER PRIMARY KEY`: a chave primária. No SQLite, uma coluna `INTEGER PRIMARY KEY` é numerada sozinha (1, 2, 3...) quando você não informa o valor. A grafia tem de ser exatamente `INTEGER`: com `INT PRIMARY KEY` a coluna **não** é numerada e guarda `NULL`. A numeração é "o maior `id` atual mais um", e por isso, se você apagar a última linha, o número é reaproveitado (o `AUTOINCREMENT` evita isso; não precisamos dele aqui).
 * `NOT NULL`: a coluna **não aceita** `NULL`. Ponto, data, parâmetro e unidade são obrigatórios; só o `valor` pode faltar.
 * `CHECK (date(data) IS data)`: a data precisa ser uma data ISO válida. O `IS` (e não `=`) é de propósito: a Armadilha 2 da Semana 4 (@sec-s4-restricoes) mostra por quê.
 * `CHECK (valor IS NULL OR typeof(valor) IN ('real', 'integer'))`: a coluna só aceita número (ou ausente). Veja a seguir por que precisamos disso.
@@ -223,6 +225,8 @@ Como ler:
 * `POINT`, um nome que parece de geociência, tem afinidade **`INTEGER`**, porque contém a sequência `INT` (regra 1). E `DATE`, `BOOLEAN`, `DECIMAL(5,2)` e até `STRING` caem em `NUMERIC` (regra 5): **o SQLite não tem tipo de data nem tipo booleano**. Por isso a nossa coluna `data` é `TEXT`.
 * `DECIMAL(5,2)` não é um decimal exato: dá só a afinidade `NUMERIC`, sem limitar casas. (A última linha da saída mostra: gravar 12,345 numa coluna assim guarda 12,345.)
 
+Uma observação sobre o código acima: a função `o_que_foi_guardado` monta o `CREATE TABLE` com um f-string, isto é, o tipo entra no **texto** da consulta. O `?` só substitui **valores**, nunca nomes de tabela, de coluna ou de tipo, nem palavras do SQL; aqui não há alternativa. Isso só é seguro porque a lista de tipos é nossa, escrita no código. Um nome que viesse de um usuário teria de ser conferido contra uma lista de nomes permitidos antes de entrar na consulta.
+
 E o que acontece quando o valor **não pode** ser convertido? O SQLite o guarda **como veio**. Por isso a coluna `valor` tem a guarda `typeof(valor) IN ('real', 'integer')`. Comparamos três versões da mesma coluna, tentando gravar o texto `'abc'` e o texto `'12.4'`:
 
 ```{python}
@@ -252,7 +256,7 @@ print("guardado em 'solta':", lab.execute("SELECT valor, typeof(valor) FROM solt
 lab.close()
 ```
 
-Leitura: na tabela `solta`, `'abc'` **entrou** e ficou guardado como texto, numa coluna "REAL". O `'12.4'` entrou nas três, mas já como o **número** 12,4. A `guardada` recusa o `'abc'` pelo `CHECK`. A tabela `STRICT` (disponível a partir do SQLite 3.37.0, de 27/11/2021, segundo a página *STRICT Tables*, sqlite.org/stricttables.html) recusa sozinha, sem precisar do `CHECK`: ela só aceita os tipos `INT`, `INTEGER`, `REAL`, `TEXT`, `BLOB` e `ANY` e confere cada valor. Neste livro usamos o `CHECK` com `typeof`, que funciona em qualquer versão, e deixamos `STRICT` como a opção moderna. Outros bancos, como o PostgreSQL, **impõem** o tipo declarado, e o SQLite é a exceção que merece este cuidado.
+Leitura: na tabela `solta`, `'abc'` **entrou** e ficou guardado como texto, numa coluna "REAL". O `'12.4'` entrou nas três, mas já como o **número** 12,4. A `guardada` recusa o `'abc'` pelo `CHECK`. A tabela `STRICT` (disponível a partir do SQLite 3.37.0, de 27/11/2021, segundo a página *STRICT Tables*, sqlite.org/stricttables.html) recusa sozinha, sem precisar do `CHECK`: ela só aceita os tipos `INT`, `INTEGER`, `REAL`, `TEXT`, `BLOB` e `ANY` (este último aceita qualquer valor) e confere cada valor dos outros tipos. Neste livro usamos o `CHECK` com `typeof`, que funciona em qualquer versão, e deixamos `STRICT` como a opção moderna. Outros bancos, como o PostgreSQL, **impõem** o tipo declarado; o SQLite é um caso à parte, e merece este cuidado.
 
 ## Inserir os dados {#sec-p106-inserir}
 
@@ -292,14 +296,14 @@ def mostrar(sql, parametros=()):
     return linhas
 ```
 
-E a tabela inteira, uma única vez, para você ter os dados diante dos olhos (as consultas seguintes sempre voltam a eles):
+E a tabela inteira, uma única vez, para você ter os dados diante dos olhos (o `*` quer dizer "todas as colunas"; a próxima seção volta a ele). As consultas seguintes sempre voltam a estes dados:
 
 ```{python}
 #| label: p106-tudo
 _ = mostrar("SELECT * FROM amostra")
 ```
 
-Repare no `id` 18 (P02, 13/08/2024, turbidez): o valor é `NULL`, escrito aqui como `NULL`.
+Repare no `id` 18 (P02, 13/08/2024, turbidez): o valor é `NULL`, que o Python chama de `None` e que a função `mostrar()` escreve como `NULL`.
 
 ## Perguntar: o SELECT {#sec-p106-select}
 
@@ -324,7 +328,7 @@ Mas o banco **não lê** nessa ordem. A leitura lógica é outra, e entendê-la 
  6. LIMIT     quantas?
 ```
 
-A documentação do SQLite (*SELECT*, sqlite.org/lang_select.html, consultada em 08/10/2026) descreve a ordem de processamento de uma consulta simples: primeiro o `FROM`, depois o `WHERE`, depois o cálculo das colunas do resultado, depois o `DISTINCT`, e trata o `ORDER BY` e o `LIMIT` à parte, no fim. Ela mesma avisa que isso é **ilustrativo**: nenhum banco precisa seguir esse caminho, desde que o resultado seja o mesmo. Para o nosso raciocínio basta a ordem lógica: como o `WHERE` vem **antes** do `SELECT`, no SQL padrão um apelido criado no `SELECT` ainda não existe dentro do `WHERE`; e como o `ORDER BY` vem **depois**, ele pode usá-lo. O PostgreSQL segue essa regra e recusa o apelido no `WHERE`; o SQLite o aceita por uma extensão sua (as duas respostas estão na @sec-p106-dialetos). Escreva como se o apelido não valesse no `WHERE`, e seu código roda nos dois.
+(Faltam aqui o `GROUP BY` e o `HAVING`, que entram entre o `WHERE` e o `SELECT` e ficam para o P1-07.) A documentação do SQLite (*SELECT*, sqlite.org/lang_select.html, consultada em 08/10/2026) descreve a ordem de processamento de uma consulta simples: primeiro o `FROM`, depois o `WHERE`, depois o cálculo das colunas do resultado, depois o `DISTINCT`, e trata o `ORDER BY` e o `LIMIT` à parte, no fim. Ela mesma avisa que isso é **ilustrativo**: nenhum banco precisa seguir esse caminho, desde que o resultado seja o mesmo. Para o nosso raciocínio basta a ordem lógica: como o `WHERE` vem **antes** do `SELECT`, no SQL padrão um apelido criado no `SELECT` ainda não existe dentro do `WHERE`; e como o `ORDER BY` vem **depois**, ele pode usá-lo. O PostgreSQL segue essa regra e recusa o apelido no `WHERE`; o SQLite o aceita por uma extensão sua (as duas respostas estão na @sec-p106-dialetos). Escreva como se o apelido não valesse no `WHERE`, e seu código roda nos dois.
 
 ### Colunas e apelidos
 
@@ -376,9 +380,9 @@ print("LIKE: no SQLite, maiúsculas e minúsculas contam como iguais (para letra
 com_like = mostrar("SELECT COUNT(*) AS linhas_de_turbidez FROM amostra WHERE parametro LIKE 'TUR%'")
 ```
 
-O `LIKE 'TUR%'` achou as linhas de `turbidez` (minúscula) porque, segundo a documentação, o SQLite trata maiúsculas e minúsculas ASCII como iguais no `LIKE`. Cuidado: **outros bancos não** (a @sec-p106-dialetos mostra o PostgreSQL).
+O `LIKE 'TUR%'` achou as linhas de `turbidez` (minúscula) porque, segundo a documentação, o SQLite trata maiúsculas e minúsculas ASCII como iguais no `LIKE`. Cuidado: o **PostgreSQL não** (a @sec-p106-dialetos mostra), e cada banco tem a sua regra.
 
-*E se?* Mude `IN ('P01', 'P03')` para `NOT IN ('P01', 'P03')` e preveja o resultado antes de rodar. Quantas linhas de OD sobram? (Sobram as 3 de P02.)
+*E se?* Mude `IN ('P01', 'P03')` para `NOT IN ('P01', 'P03')` e preveja o resultado antes de rodar. Quantas linhas de OD sobram? Rode e confira.
 
 ### ORDER BY, LIMIT e DISTINCT
 
@@ -495,6 +499,22 @@ print(f"   valor <> 135: {diferente} linhas | valor IS NOT 135: {is_not} linhas"
 
 Leitura: (1) `= NULL` devolve **zero linhas, sem aviso**: o banco responde com serenidade a uma pergunta que não faz sentido. (2) `IS NULL` acha a amostra perdida. (3) Das 6 amostras de turbidez, 1 passa de 100 UNT e 4 ficam dentro do limite: 1 + 4 = 5, não 6. A sexta (a sem resultado) não é "acima" nem "dentro", é **desconhecida**, e some das duas respostas. E `NOT (valor > 100)` não resolve, porque o `NOT` de desconhecido é desconhecido. (4) `<>` perde o `NULL`; `IS NOT` o inclui. Em relatório de qualidade da água, é a diferença entre "4 amostras conformes" e "4 conformes, 1 acima do limite e **1 sem resultado**".
 
+**E no `CHECK`?** O `CHECK` segue a regra **oposta** à do `WHERE`: ele só recusa a linha quando a condição dá **falso**; se der desconhecido, a linha **entra**. Por isso a coluna `data` da nossa tabela usa `IS` e não `=`:
+
+```{python}
+#| label: p106-check-null
+lab = sqlite3.connect(":memory:")
+lab.execute("CREATE TABLE com_igual (data TEXT CHECK (date(data) = data))")
+lab.execute("CREATE TABLE com_is (data TEXT CHECK (date(data) IS data))")
+check_com_igual = tentar(lab, "INSERT INTO com_igual VALUES ('abc')")
+check_com_is = tentar(lab, "INSERT INTO com_is VALUES ('abc')")
+lab.close()
+print("CHECK (date(data) = data):  inserir 'abc' ->", check_com_igual)
+print("CHECK (date(data) IS data): inserir 'abc' ->", check_com_is)
+```
+
+`date('abc')` é `NULL`; `NULL = 'abc'` é desconhecido, e o `CHECK` deixa a linha passar: a data `'abc'` **entrou**. Com `IS`, a comparação dá falso e a linha é recusada. A mesma condição, duas regras: no `WHERE`, desconhecido descarta; no `CHECK`, desconhecido aprova.
+
 O `NULL` também aparece na ordenação e na repetição:
 
 * **Ordem:** segundo a documentação do SQLite, `NULL` é tratado como **menor que qualquer outro valor** para ordenar: aparece **no começo** de um `ASC` e **no fim** de um `DESC`. (Em outros bancos pode ser o contrário.)
@@ -568,7 +588,7 @@ ORDER BY data
 
 Na amostra perdida (a terceira linha), `ponto || ' · ' || valor` virou `NULL` inteiro, não "P02 · NULL". Se precisar do texto, use `COALESCE(valor, 'sem resultado')`.
 
-**Datas.** Com datas ISO, o SQLite oferece `date()`, `strftime()` e `julianday()` (SQLite, *Date And Time Functions*, sqlite.org/lang_datefunc.html, consultada em 08/10/2026). `strftime('%Y', data)` devolve o ano, `%m` o mês (01 a 12) e `%j` o dia do ano (001 a 366), **sempre como texto**; `julianday(data)` é um número de dias, e a diferença entre dois deles é a quantidade de dias entre as datas. Uma data inválida dá `NULL`. Conferindo contra o módulo `datetime` do Python:
+**Datas.** Com datas ISO, o SQLite oferece `date()`, `strftime()` e `julianday()` (SQLite, *Date And Time Functions*, sqlite.org/lang_datefunc.html, consultada em 08/10/2026). `strftime('%Y', data)` devolve o ano, `%m` o mês (01 a 12) e `%j` o dia do ano (001 a 366), **sempre como texto**; `julianday(data)` é um número de dias, e a diferença entre dois deles é a quantidade de dias entre as datas. Uma data em formato inválido dá `NULL`, e um dia que não existe no mês (30 de fevereiro) é **normalizado** em vez de recusado (a @sec-p106-dialetos mostra). Conferindo contra o módulo `datetime` do Python:
 
 ```{python}
 #| label: p106-datas-sql
@@ -577,7 +597,7 @@ SELECT DISTINCT data,
        strftime('%Y', data) AS ano,
        strftime('%m', data) AS mes,
        strftime('%j', data) AS dia_do_ano,
-       CAST(julianday(data) - julianday('2024-02-20') AS INTEGER) AS dias_desde_a_1a_campanha
+       CAST(ROUND(julianday(data) - julianday('2024-02-20')) AS INTEGER) AS dias_desde_a_1a_campanha
 FROM amostra
 ORDER BY data
 """)
@@ -590,7 +610,7 @@ datas_py = [
 print("SQL e Python concordam nas datas:", datas_sql == datas_py)
 ```
 
-A segunda campanha veio 84 dias (12 semanas) depois da primeira, e a terceira, 175 dias depois (25 semanas). E o `strftime('%m')` devolve o texto `'05'`, não o número 5; para fazer conta, use `CAST(strftime('%m', data) AS INTEGER)`.
+A segunda campanha veio 84 dias (12 semanas) depois da primeira, e a terceira, 175 dias depois (25 semanas). (O `ROUND` dentro do `CAST` é uma proteção: o `julianday` é um número real, e uma diferença como 83,9999... seria cortada para 83 pelo `CAST`.) E o `strftime('%m')` devolve o texto `'05'`, não o número 5; para fazer conta, use `CAST(strftime('%m', data) AS INTEGER)`.
 
 **Tipo guardado.** `typeof(x)` mostra a classe do valor realmente guardado, e `CAST(x AS tipo)` converte. É a ferramenta para investigar a tabela quando algo parece estranho:
 
@@ -658,7 +678,7 @@ Só uma: o pH 5,8 de P02, em agosto. O 6,3 de P02 em maio **passa** (está acima
 #| label: p106-q3
 sql_q3 = """
 SELECT ponto, data, valor FROM amostra
-WHERE parametro = 'turbidez'
+WHERE parametro = 'turbidez' AND valor IS NOT NULL
 ORDER BY valor DESC
 LIMIT 3
 """
@@ -677,9 +697,16 @@ q3_menores = mostrar("SELECT ponto, data, valor FROM amostra WHERE parametro = '
 q3_menores_python = sorted(medidas_de_turbidez, key=lambda t: t[2])[:3]
 conferencias["q3_menores"] = q3_menores == q3_menores_python
 print("SQL corrigido e Python concordam:", conferencias["q3_menores"])
+
+if sqlite3.sqlite_version_info >= (3, 30, 0):  # NULLS FIRST e NULLS LAST existem desde o SQLite 3.30.0
+    print()
+    print("Outro jeito: dizer onde o NULL fica, na própria ordenação (NULLS LAST):")
+    q3_nulls_last = mostrar("SELECT ponto, data, valor FROM amostra WHERE parametro = 'turbidez' ORDER BY valor NULLS LAST LIMIT 3")
+    conferencias["q3_nulls_last"] = q3_nulls_last == q3_menores_python
+    print("SQL com NULLS LAST e Python concordam:", conferencias["q3_nulls_last"])
 ```
 
-As três maiores (135, 60 e 18 UNT) vieram certas, porque o `NULL` fica no **fim** de um `DESC`. Já no `ORDER BY valor LIMIT 3` (crescente), o `NULL` aparece **primeiro** e ocupa uma das três vagas: a "menor turbidez" virou "amostra sem resultado". O molde era o mesmo, o resultado quase certo, e **sem erro nenhum**. Foi a conferência com o Python que mostraria isso (e a leitura atenta do `NULL`, que aparece na tabela). A correção é decidir, na consulta, o que fazer com o ausente: aqui, `valor IS NOT NULL`.
+As três maiores (135, 60 e 18 UNT) vieram certas, e repare que a consulta já exclui o ausente (`valor IS NOT NULL`). Sem isso, o resultado dependeria de onde o banco põe o `NULL`: no fim de um `DESC` no SQLite, mas no **começo** no PostgreSQL (a @sec-p106-dialetos mostra). Já no `ORDER BY valor LIMIT 3` crescente e sem o filtro, o `NULL` aparece **primeiro** no SQLite e ocupa uma das três vagas: a "menor turbidez" virou "amostra sem resultado". O molde era o mesmo, o resultado quase certo, e **sem erro nenhum**. Foi a conferência com o Python que mostraria isso. A correção é decidir, na consulta, o que fazer com o ausente: `valor IS NOT NULL`, ou então dizer onde ele fica com `ORDER BY valor NULLS LAST` (SQLite 3.30 ou mais novo; o PostgreSQL também aceita), que não depende do padrão de cada banco.
 
 **Pergunta 4. Em cada amostra de turbidez: acima, dentro do limite ou sem resultado?**
 
@@ -713,9 +740,17 @@ conferencias["q4"] = q4_sql == q4_python
 contagem_q4 = {s: sum(1 for linha in q4_sql if linha[3] == s) for s in ("acima do limite", "dentro do limite", "sem resultado")}
 print("SQL e Python concordam:", conferencias["q4"])
 print("contagem por situação:", contagem_q4, "| soma:", sum(contagem_q4.values()))
+
+# o CASE "ingênuo", sem o ramo do NULL: o ausente cai no ELSE
+dentro_sem_ramo_nulo = banco.execute(
+    "SELECT COUNT(*) FROM amostra WHERE parametro = 'turbidez' "
+    "AND (CASE WHEN valor > ? THEN 'acima do limite' ELSE 'dentro do limite' END) = 'dentro do limite'",
+    (TURBIDEZ_MAXIMA_UNT,),
+).fetchone()[0]
+print("sem o ramo do NULL, o CASE conta", dentro_sem_ramo_nulo, "amostras 'dentro do limite' (o certo são", contagem_q4["dentro do limite"], ")")
 ```
 
-Agora as três classes **somam as 6 amostras** (1 + 4 + 1), ao contrário da divisão em "acima" e "dentro" da seção do `NULL`. O que mudou? A **primeira** condição do `CASE` é `valor IS NULL`: o `CASE` testa as condições na ordem e para na primeira verdadeira, então o ausente é tratado antes de qualquer comparação. Se você colocar o `IS NULL` por último, o `ELSE` o classifica como "dentro do limite" (porque `NULL > 100` não é verdadeiro), e uma amostra que **nunca foi medida** passa por conforme.
+Agora as três classes **somam as 6 amostras** (1 + 4 + 1), ao contrário da divisão em "acima" e "dentro" da seção do `NULL`. O que mudou? Há um ramo **explícito** para o ausente (`WHEN valor IS NULL`). O `CASE` testa as condições na ordem e para na primeira verdadeira; como `NULL > 100` é desconhecido (não é verdadeiro), o ausente passa por todas as comparações sem ser pego e cairia no `ELSE`. Sem o ramo do `NULL`, o `ELSE` o classificaria como "dentro do limite": a saída acima mostra o `CASE` ingênuo contando **5** amostras como "dentro do limite" em vez de 4, e uma amostra que **nunca foi medida** passaria por conforme. Pôr o ramo do `NULL` **primeiro** não é obrigatório (antes do `ELSE`, o resultado seria o mesmo), mas é um bom hábito: quem lê a consulta vê o ausente tratado antes de qualquer comparação.
 
 **Pergunta 5. Quanto de folga (ou falta) o OD teve em cada amostra, por ponto?**
 
@@ -793,6 +828,7 @@ def resultado_no_sqlite(sql):
 SONDAS = [
     ("div_inteira", "7 / 2", "SELECT 7 / 2"),
     ("div_real", "7 / 2.0", "SELECT 7 / 2.0"),
+    ("div_zero", "1 / 0", "SELECT 1 / 0"),
     ("cast_positivo", "CAST(7.9 AS INTEGER)", "SELECT CAST(7.9 AS INTEGER)"),
     ("cast_negativo", "CAST(-7.5 AS INTEGER)", "SELECT CAST(-7.5 AS INTEGER)"),
     ("like_caixa", "'ABC' LIKE 'abc'", "SELECT CASE WHEN 'ABC' LIKE 'abc' THEN 'verdadeiro' ELSE 'falso' END"),
@@ -828,6 +864,7 @@ SONDAS += [
 POSTGRESQL_16_15 = {
     "div_inteira": "3",
     "div_real": "3.5000000000000000",
+    "div_zero": "ERRO: division by zero",
     "cast_positivo": "8",
     "cast_negativo": "-8",
     "like_caixa": "falso",
@@ -853,16 +890,16 @@ for chave, o_que, _sql in SONDAS:
 
 (O rótulo do SQLite mostra a versão **do seu computador**; o do PostgreSQL é sempre a do registro.)
 
-Como ler a lista, do mais ao menos traiçoeiro:
+Como ler a lista:
 
-* **Quando o SQLite diz sim e o PostgreSQL diz erro**, o PostgreSQL está sendo o estrito. Gravar `'abc'` numa coluna numérica, usar aspas duplas como texto, usar apelido no `WHERE` e escrever uma data impossível (`2024-02-30`, que o SQLite "corrige" para `2024-03-01` e o PostgreSQL recusa) passam no SQLite e falham no outro. Código que só roda no SQLite, por causa da tolerância, quebra ao mudar de banco.
+* **Quando o SQLite diz sim e o PostgreSQL diz erro**, o PostgreSQL está sendo o estrito. Gravar `'abc'` numa coluna numérica, usar aspas duplas como texto, usar apelido no `WHERE`, dividir por zero (o SQLite devolve `NULL`) e escrever uma data impossível (`2024-02-30`, que o SQLite "corrige" para `2024-03-01` e o PostgreSQL recusa) passam no SQLite e falham no outro. Código que só roda no SQLite, por causa da tolerância, quebra ao mudar de banco.
 * **Quando os dois respondem, mas diferente**, não há aviso nenhum: `CAST(7.9 AS INTEGER)` dá 7 no SQLite (corta) e 8 no PostgreSQL (arredonda); `'ABC' LIKE 'abc'` é verdadeiro num e falso no outro (o PostgreSQL tem `ILIKE` para ignorar a caixa); o `NULL` fica no começo de um `ORDER BY` crescente no SQLite e no fim no PostgreSQL. Esses são os piores, porque o resultado muda sem um erro que denuncie.
 * **Quando uma função não existe no outro**, o erro é claro: `strftime`, `julianday` e `typeof` são do SQLite; no PostgreSQL usam-se `to_char` e `EXTRACT`, a subtração de datas e `pg_typeof`. O `ROUND(x, n)`, com duas entradas, só existe no PostgreSQL para `numeric`, e não para ponto flutuante.
 * **Onde os dois concordam:** a divisão entre inteiros corta nos dois (`7 / 2` é 3), e `NULL = NULL` é desconhecido nos dois. A lógica de três valores é do padrão, não do SQLite.
 
 Não para por aí: o `id INTEGER PRIMARY KEY` numerado sozinho é do SQLite. No PostgreSQL, a mesma tabela recusa a linha sem `id`; lá se escreve `id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY`, e o `INSERT` sem `id` funcionou nesse formato (registro de 08/10/2026).
 
-**A regra prática.** Aprenda o SQL pelo SQLite, mas **escreva** no estilo que roda nos dois: aspas simples para texto, parênteses nos `AND`/`OR`, apelido só no `ORDER BY`, o `ROUND` escrito por extenso antes do `CAST` quando quiser arredondar (em vez de contar com o que o `CAST` faz), e uma data sempre válida. Quando os dialetos divergirem de verdade (datas, por exemplo), isole a parte específica numa função ou numa consulta com nome, para trocar num lugar só.
+**A regra prática.** Aprenda o SQL pelo SQLite, mas **escreva** o mais perto do padrão que puder: aspas simples para texto, parênteses nos `AND`/`OR`, apelido só no `ORDER BY` e **sozinho** (no PostgreSQL, `ORDER BY dobro + 1` não aceita o apelido), `IS NOT NULL` ou `NULLS LAST` em vez de depender de onde o banco põe o `NULL`, `ROUND(x)` seguido de `CAST` quando quiser arredondar (em vez de contar com o que o `CAST` faz sozinho), e uma data sempre válida. **Nem tudo é portátil**, e este capítulo não finge que é: o `IS` com um valor (`valor IS NOT 135.0`, ou o `CHECK (date(data) IS data)` da nossa tabela; no PostgreSQL, a forma é `IS NOT DISTINCT FROM`), o `ROUND(x, n)` sobre um número real e o `COALESCE(valor, 'sem resultado')` com `valor` numérico (o PostgreSQL recusa misturar texto e número) funcionam no SQLite e falham no PostgreSQL 16.15 (conferido em 08/10/2026). Quando os dialetos divergirem de verdade (datas, por exemplo), isole a parte específica numa função ou numa consulta com nome, para trocar num lugar só.
 
 ## Erros clássicos {#sec-p106-erros}
 
@@ -875,7 +912,7 @@ Não para por aí: o `id INTEGER PRIMARY KEY` numerado sozinho é do SQLite. No 
 7. **Datas fora do formato ISO.** `14/05/2024` ordena errado e o `date()` devolve `NULL`.
 8. **Dividir dois inteiros esperando decimal.** `7 / 2` é 3; faça um lado real ou use `CAST`.
 9. **Aspas duplas para texto.** Funcionam no SQLite por tolerância e quebram no PostgreSQL.
-10. **Montar SQL juntando texto** (f-string com o valor dentro). Abre a porta da injeção; use `?`.
+10. **Montar SQL juntando texto** (f-string com o valor dentro). Abre a porta da injeção; use `?` ou `:nome`. (O `?` vale para valores, nunca para nomes de tabela ou de coluna: esses só entram no texto depois de conferidos contra uma lista de nomes permitidos.)
 11. **Esquecer o `commit()`.** Os dados ficam só na transação; outra conexão não os vê.
 12. **`SELECT *` dentro de programas.** O resultado muda de forma quando a tabela ganha uma coluna.
 13. **Supor que o SQL que roda no SQLite roda no PostgreSQL.** Veja a @sec-p106-dialetos.
@@ -935,7 +972,7 @@ Resultado: **7,4** em P03, em 13/08/2024, e **7,2** em P01, em 20/02/2024. Como 
 ```python
 ex4_sql = [r[1] for r in banco.execute("SELECT DISTINCT data, strftime('%w', data) FROM amostra ORDER BY data")]
 ex4_python = [datetime.date.fromisoformat(d).isoweekday() for d in sorted({a[1] for a in AMOSTRAS})]
-dias_ago_mai = banco.execute("SELECT CAST(julianday('2024-08-13') - julianday('2024-05-14') AS INTEGER)").fetchone()[0]
+dias_ago_mai = banco.execute("SELECT CAST(ROUND(julianday('2024-08-13') - julianday('2024-05-14')) AS INTEGER)").fetchone()[0]
 dias_py = (datetime.date(2024, 8, 13) - datetime.date(2024, 5, 14)).days
 print(ex4_sql, ex4_python, dias_ago_mai, dias_py)
 assert ex4_sql == ["2", "2", "2"] and ex4_python == [2, 2, 2] and dias_ago_mai == dias_py == 91
@@ -1018,7 +1055,7 @@ print(contagem_desafio)
 assert desafio_sql == desafio_python
 assert contagem_desafio == {"fora": 4, "conforme": 15, "sem resultado": 1}
 ```
-Resultado: **4** amostras fora (os ids 6, 10, 16 e 17: a turbidez de 135 UNT, os dois OD baixos de P02 e o pH 5,8), **15** conformes e **1** sem resultado (o id 18), totalizando as 20. A ordem dos `WHEN` importa: o `IS NULL` vem primeiro, como na Pergunta 4. O `id` é o número que o SQLite deu na ordem em que inserimos; por isso a comparação com `enumerate(..., start=1)` funciona **neste** capítulo, mas é uma ligação frágil: num banco real, case pelas colunas, não pela posição.
+Resultado: **4** amostras fora (os ids 6, 10, 16 e 17: a turbidez de 135 UNT, os dois OD baixos de P02 e o pH 5,8), **15** conformes e **1** sem resultado (o id 18), totalizando as 20. O ramo `IS NULL` é indispensável (sem ele, o ausente cairia no `ELSE` e seria dado como `'conforme'`); pô-lo primeiro, como na Pergunta 4, é só um bom hábito de leitura. O `id` é o número que o SQLite deu na ordem em que inserimos; por isso a comparação com `enumerate(..., start=1)` funciona **neste** capítulo, mas é uma ligação frágil: num banco real, case pelas colunas, não pela posição.
 :::
 
 ## Entregável {#sec-p106-entregavel}

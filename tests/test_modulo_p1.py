@@ -110,7 +110,7 @@ class CapituloP106(unittest.TestCase):
         self.assertEqual(len(ns["por_ponto_data"]), 7)
         self.assertEqual(ns["parametros"], [("OD",), ("pH",), ("turbidez",)])
         self.assertEqual(len(ns["combinacoes"]), 7)          # "7 combinações de data e ponto"
-        # "E se?": com NOT IN ('P01', 'P03') sobram as 3 linhas de OD de P02 (o banco já está fechado: conta-se na lista)
+        # "E se?" (sem resposta no texto): com NOT IN ('P01', 'P03') sobram as 3 linhas de OD de P02 (o banco já está fechado)
         sobram = [a for a in ns["AMOSTRAS"] if a[2] == "OD" and a[0] not in ("P01", "P03")]
         self.assertEqual(len(sobram), 3)
 
@@ -136,6 +136,8 @@ class CapituloP106(unittest.TestCase):
         self.assertEqual((ns["diferente"], ns["is_not"]), (4, 5))                          # <> perde o NULL, IS NOT não
         self.assertIsNone(ns["turbidez_asc"][0][2])                                        # ASC: NULL primeiro
         self.assertIsNone(ns["turbidez_desc"][-1][2])                                      # DESC: NULL por último
+        self.assertEqual(ns["check_com_igual"], "ENTROU")                                  # CHECK aceita o desconhecido...
+        self.assertTrue(ns["check_com_is"].startswith("RECUSADO"))                         # ...e o IS o transforma em falso
         self.assertEqual(ns["media_correta"], 46.8)                                        # 234 / 5
         self.assertEqual(ns["media_com_zero"], 39.0)                                       # 234 / 6
         self.assertEqual(sum(ns["medidos"]), 234.0)
@@ -162,7 +164,10 @@ class CapituloP106(unittest.TestCase):
     # -- as cinco perguntas ----------------------------------------------------------------------------------------
     def test_pratica_conferencias(self):
         ns = self.ns
-        self.assertEqual(set(ns["conferencias"]), {"q1", "q2", "q3", "q3_menores", "q4", "q5"})
+        esperadas = {"q1", "q2", "q3", "q3_menores", "q4", "q5"}
+        if ns["sqlite3"].sqlite_version_info >= (3, 30, 0):             # NULLS LAST só existe a partir do SQLite 3.30.0
+            esperadas.add("q3_nulls_last")
+        self.assertEqual(set(ns["conferencias"]), esperadas)
         self.assertTrue(all(ns["conferencias"].values()), ns["conferencias"])
         self.assertEqual(ns["q1_sql"], [("P02", "2024-05-14", 4.8), ("P02", "2024-08-13", 3.9)])
         self.assertEqual(ns["q2_sql"], [("P02", "2024-08-13", 5.8)])                         # o 6,3 passa
@@ -171,6 +176,7 @@ class CapituloP106(unittest.TestCase):
         self.assertEqual([r[2] for r in ns["q3_menores"]], [9.0, 12.0, 18.0])
         self.assertEqual(ns["contagem_q4"], {"acima do limite": 1, "dentro do limite": 4, "sem resultado": 1})
         self.assertEqual(sum(ns["contagem_q4"].values()), 6)
+        self.assertEqual(ns["dentro_sem_ramo_nulo"], 5)                                       # o CASE sem o ramo do NULL erra por 1
         self.assertEqual([r[4] for r in ns["q5_sql"]], [2.8, 2.5, 2.1, 1.1, -0.2, -1.1, 1.5])
         self.assertEqual(ns["pontos_abaixo_no_grafico"], 2)
         self.assertEqual(len(ns["_figuras"]), 1)
@@ -184,6 +190,7 @@ class CapituloP106(unittest.TestCase):
         self.assertEqual(set(ns["POSTGRESQL_16_15"]), chaves)          # o registro cobre cada sonda
         sq = ns["dialeto_sqlite"]
         self.assertEqual((sq["div_inteira"], sq["div_real"]), ("3", "3.5"))
+        self.assertEqual(sq["div_zero"], "NULL")                       # o SQLite devolve NULL; o PostgreSQL dá erro
         self.assertEqual((sq["cast_positivo"], sq["cast_negativo"]), ("7", "-7"))
         self.assertEqual(sq["like_caixa"], "verdadeiro")
         self.assertEqual(sq["null_igual"], "NULL")
@@ -201,7 +208,7 @@ class CapituloP106(unittest.TestCase):
         self.assertEqual((pg["cast_positivo"], pg["cast_negativo"]), ("8", "-8"))
         self.assertEqual((pg["ordem_asc"], pg["ordem_desc"]), ("1.0", "NULL"))
         self.assertEqual(pg["like_caixa"], "falso")
-        for chave in ("aspas_duplas", "apelido_where", "mes_da_data", "tipo_do_valor", "data_impossivel", "round_flutuante", "id_automatico"):
+        for chave in ("div_zero", "aspas_duplas", "apelido_where", "mes_da_data", "tipo_do_valor", "data_impossivel", "round_flutuante", "id_automatico"):
             self.assertTrue(pg[chave].startswith("ERRO"), chave)
         self.assertTrue(pg["abc_em_real"].startswith("recusado"))
 
@@ -243,6 +250,7 @@ class CapituloP106(unittest.TestCase):
             "1 + 4 = 5, não 6",
             "**4** amostras fora",
             "**15** conformes",
+            "contando **5** amostras",   # o CASE ingênuo
             "versão 16.15",
         ):
             self.assertIn(citacao, texto, citacao)
@@ -266,6 +274,16 @@ class Estrutura(unittest.TestCase):
         self.assertIn("CONAMA", texto)
         self.assertIn("08/10/2026", texto)
         self.assertIn("Não conferi", texto)
+
+    def test_o_texto_nao_repete_afirmacoes_corrigidas_na_revisao(self):
+        texto = ler(CAPITULO)
+        # a ordem dos WHEN não muda o resultado quando há ramo IS NULL; o que importa é existir o ramo
+        self.assertNotIn("Se você colocar o `IS NULL` por último", texto)
+        self.assertNotIn("A ordem dos `WHEN` importa", texto)
+        # `?1` com tupla é descontinuado no Python 3.12
+        self.assertNotRegex(texto, r"\?\d")
+        # "outros bancos não" generalizava demais
+        self.assertNotIn("outros bancos não", texto)
 
     def test_nenhum_segredo_no_capitulo(self):
         texto = ler(CAPITULO).lower()
