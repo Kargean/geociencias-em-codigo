@@ -21,6 +21,9 @@ book:
         - p0-00-semana2-python-testes.qmd
         - p0-00-semana3-github.qmd
         - p0-00-semana4-sql-ciclo.qmd
+    - part: "P1 · Programação e dados tabulares"
+      chapters:
+        - p1-06-sql-essencial-i.qmd
     - part: "P9 · Solo e rocha: exemplo desenvolvido (estrutural)"
       chapters:
         - cap-estrutural-atitudes.qmd

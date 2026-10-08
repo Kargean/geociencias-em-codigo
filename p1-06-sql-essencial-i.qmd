@@ -1,0 +1,1107 @@
+# P1-06 · SQL essencial I: banco relacional, tabelas e consultas simples {#sec-p106}
+
+::: {.callout-note icon=false}
+## Neste capítulo
+
+**Pergunta que guia tudo:** como eu pergunto a uma tabela de medições o que quero saber e como tenho certeza de que a resposta está certa?
+
+**Você vai ser capaz de:**
+
+1. dizer o que são tabela, linha, coluna e chave, e por que guardar **uma medição por linha**;
+2. criar uma tabela com `CREATE TABLE`, escolher os tipos e explicar por que, no SQLite, o tipo declarado é uma **sugestão** (a *afinidade de tipos*);
+3. inserir dados com `INSERT` e com parâmetros `?`;
+4. escrever consultas com `SELECT`, `WHERE`, `ORDER BY`, `LIMIT` e `DISTINCT`, sabendo **em que ordem o banco as lê**;
+5. prever o resultado de comparações e filtros com `NULL` (a **lógica de três valores**);
+6. usar expressões e funções escalares (`ROUND`, `COALESCE`, `CASE`, `strftime`);
+7. **conferir cada resposta do SQL contra um cálculo em Python** e reconhecer as diferenças de dialeto entre SQLite e PostgreSQL.
+
+**Pré-requisitos:** a seção "E o SQL? Onde rodar as consultas" da Semana 0 (@sec-s0-sql) e o básico de Python (listas, tuplas, funções). A Semana 4 do P0-00 (@sec-p000-s4) já mostrou uma volta rápida por estes assuntos com outro banco; aqui voltamos a eles com calma, em ordem e com dados de qualidade da água.
+
+**Tempo sugerido:** 3 h, em duas sessões: (1) da @sec-p106-conceitos até a @sec-p106-select; (2) da @sec-p106-null até o fim.
+:::
+
+```{python}
+#| label: p106-imports
+#| echo: false
+import datetime
+import math
+import sqlite3
+from itertools import product
+
+import matplotlib.pyplot as plt
+
+banco = sqlite3.connect(":memory:")  # o banco do capítulo: vive na memória e some quando o programa termina
+```
+
+## Um banco relacional em um minuto {#sec-p106-conceitos}
+
+Uma planilha deixa você escrever qualquer coisa em qualquer célula: um "n/d" no meio de uma coluna de números, uma data escrita de três jeitos. Um **banco de dados relacional** guarda os dados em **tabelas** com regras. O vocabulário cabe em cinco palavras:
+
+| Termo | O que é | No nosso exemplo |
+|:--|:--|:--|
+| **Tabela** | conjunto de registros do mesmo tipo, com as mesmas colunas | `amostra`: todas as amostras de água |
+| **Linha** (registro) | um item da tabela | uma medição: "no ponto P02, em 14/05/2024, o oxigênio dissolvido foi 4,8 mg/L" |
+| **Coluna** (campo) | um atributo, com nome e tipo | `ponto`, `data`, `parametro`, `valor`, `unidade` |
+| **Chave primária** | a coluna (ou grupo de colunas) que identifica cada linha de forma única | `id` |
+| **Esquema** | a descrição das tabelas: nomes, tipos, regras | o `CREATE TABLE` que escreveremos |
+
+**Uma medição por linha.** Em vez de uma coluna para cada parâmetro (`od`, `ph`, `turbidez`...), guardamos **ponto, data, parâmetro, valor e unidade** em cada linha. Esse formato (chamado *longo*) tem vantagens: um parâmetro novo não exige coluna nova; uma medição que faltou é só um `NULL` naquela linha; e filtrar por parâmetro é uma condição simples. O formato *largo* (uma coluna por parâmetro) é melhor para algumas contas e gráficos, e o pandas converte de um para o outro (P1-04 e P1-05).
+
+O SQLite é um banco inteiro dentro de **um arquivo** (ou, como aqui, na memória), sem servidor. Se você quer saber o que muda com um servidor, volte à @sec-s0-servidor. O **PostgreSQL**, que aparece neste capítulo só para comparar dialetos, é um banco de servidor.
+
+## Convenções deste capítulo {#sec-p106-convencoes}
+
+Antes de qualquer consulta, as regras do jogo (convenções declaradas, regra 4 do método):
+
+| Assunto | Convenção | Por quê |
+|:--|:--|:--|
+| Datas | texto ISO 8601, `AAAA-MM-DD` | ordena como data e é o formato que as funções de data do SQLite entendem |
+| Valor ausente | `NULL` (no Python, `None`); **nunca** `0`, `-999` ou `"n/d"` | ausente não é zero (o `NULL` ganha uma seção inteira, a @sec-p106-null) |
+| Unidades | uma coluna `unidade`, em cada linha | o número sozinho não diz o que mede |
+| Nomes | minúsculas, sem acento nem espaço (`parametro`, `amostra`) | evita aspas e problemas entre sistemas |
+| Palavras do SQL | MAIÚSCULAS; nas consultas longas, uma cláusula por linha | só legibilidade: o SQL não exige |
+| Texto no SQL | aspas **simples** (`'OD'`); aspas duplas são para nomes | é o padrão do SQL e evita um erro silencioso (veja a @sec-p106-dialetos) |
+| Valores que vêm de variáveis | parâmetro `?` (ou `:nome`), nunca texto colado; o `?` vale só para **valores**, não para nomes de tabela ou de coluna | segurança, como na @sec-s0-sql |
+| Limites legais | constantes nomeadas e comentadas, com a fonte | regra 6 do método |
+
+Por que o formato ISO? Porque o texto `2024-05-14` ordena por ordem alfabética **na mesma ordem do calendário**. Com o formato brasileiro, não:
+
+```{python}
+#| label: p106-datas
+iso = ["2024-05-14", "2024-02-20", "2024-08-13"]
+brasileiro = ["14/05/2024", "20/02/2024", "13/08/2024"]
+print("ISO ordenado:        ", sorted(iso))
+print("brasileiro ordenado: ", sorted(brasileiro))
+print("date() entende o ISO:", banco.execute("SELECT date('2024-02-20')").fetchone()[0])
+print("date() e o brasileiro:", banco.execute("SELECT date('20/02/2024')").fetchone()[0])
+```
+
+O formato brasileiro ordenou **agosto antes de maio**, e a função `date()` não o reconhece (devolve `NULL`). Guarde sempre em ISO; formate como `dd/mm/aaaa` só na hora de mostrar.
+
+E a versão do SQLite que está rodando aqui:
+
+```{python}
+#| label: p106-versao
+print("SQLite", sqlite3.sqlite_version)
+```
+
+(Este capítulo foi escrito e testado com a versão 3.45.1; no seu computador pode aparecer outra. Onde a versão importa, o texto avisa.)
+
+## Os dados: 20 amostras sintéticas {#sec-p106-dados}
+
+Para saber se uma resposta está certa, precisamos de dados cuja resposta conhecemos (regra 1 do método). Vamos inventar uma campanha de monitoramento: um rio com **três pontos** (P01, a montante de um lançamento de esgoto tratado; P02, a jusante dele; P03, num afluente) e **três campanhas** (fevereiro, maio e agosto de 2024), medindo **oxigênio dissolvido** (OD, em mg/L), **pH** (adimensional) e **turbidez** (em UNT, unidade nefelométrica de turbidez). **As medições são sintéticas: nenhum desses números foi medido em rio algum.** Uma amostra de turbidez de P02, em agosto, **não tem resultado** (o frasco dessa análise foi perdido): é o nosso `NULL`.
+
+Um cuidado com o vocabulário: aqui, cada **linha** da tabela `amostra` é um **resultado** (um parâmetro, num ponto e dia). Num laboratório de verdade, uma amostra (o frasco coletado) rende vários resultados; a modelagem com mais de uma tabela vem nos módulos seguintes. Por isso, "amostra sem resultado" é, a rigor, uma **análise de turbidez** que não tem valor.
+
+Como referência para dizer se uma amostra "passa", usamos os limites da **classe 2** das águas doces da Resolução CONAMA nº 357, de 17 de março de 2005 (arts. 14 e 15): OD "em qualquer amostra, não inferior a 5 mg/L O2", turbidez "até 100 UNT" e pH na faixa de 6,0 a 9,0. A classe 2 é a que vale enquanto o corpo de água não tem enquadramento aprovado (art. 42), e por isso é uma escolha natural para um exemplo. Fonte: texto da resolução na cópia da CETESB (licenciamento.cetesb.sp.gov.br/legislacao/federal/resolucoes/2005_Res_CONAMA_357.pdf), consultada em 08/10/2026. **Não conferi** se resoluções posteriores (como a 410/2009 e a 430/2011) mudaram esses três itens; confira a versão consolidada antes de usar estes números num trabalho real. Os limites ficam em constantes nomeadas (regra 6). Nas seções de `SELECT`, os números aparecem escritos dentro das consultas só para você lê-las melhor; na prática (@sec-p106-pratica), as consultas recebem as constantes por parâmetro:
+
+```{python}
+#| label: p106-dados
+# Limites da classe 2 de águas doces (Resolução CONAMA 357/2005, arts. 14 e 15), consulta de 08/10/2026
+OD_MINIMO_MG_L = 5.0         # oxigênio dissolvido, mínimo em qualquer amostra (mg/L de O2)
+PH_MINIMO = 6.0              # pH, faixa permitida
+PH_MAXIMO = 9.0
+TURBIDEZ_MAXIMA_UNT = 100.0  # turbidez, máximo (UNT)
+
+AMOSTRAS = [  # (ponto, data, parametro, valor, unidade); None = amostra sem resultado
+    ("P01", "2024-02-20", "OD", 7.8, "mg/L"),
+    ("P01", "2024-02-20", "pH", 7.2, "adim."),
+    ("P01", "2024-02-20", "turbidez", 18.0, "UNT"),
+    ("P02", "2024-02-20", "OD", 6.1, "mg/L"),
+    ("P02", "2024-02-20", "pH", 6.8, "adim."),
+    ("P02", "2024-02-20", "turbidez", 135.0, "UNT"),
+    ("P01", "2024-05-14", "OD", 7.5, "mg/L"),
+    ("P01", "2024-05-14", "pH", 7.0, "adim."),
+    ("P01", "2024-05-14", "turbidez", 12.0, "UNT"),
+    ("P02", "2024-05-14", "OD", 4.8, "mg/L"),
+    ("P02", "2024-05-14", "pH", 6.3, "adim."),
+    ("P02", "2024-05-14", "turbidez", 60.0, "UNT"),
+    ("P01", "2024-08-13", "OD", 7.1, "mg/L"),
+    ("P01", "2024-08-13", "pH", 6.9, "adim."),
+    ("P01", "2024-08-13", "turbidez", 9.0, "UNT"),
+    ("P02", "2024-08-13", "OD", 3.9, "mg/L"),
+    ("P02", "2024-08-13", "pH", 5.8, "adim."),
+    ("P02", "2024-08-13", "turbidez", None, "UNT"),  # frasco perdido: sem resultado
+    ("P03", "2024-08-13", "OD", 6.5, "mg/L"),
+    ("P03", "2024-08-13", "pH", 7.4, "adim."),
+]
+print(len(AMOSTRAS), "amostras;", sum(1 for a in AMOSTRAS if a[3] is None), "sem resultado")
+```
+
+A lista está na ordem em que as amostras foram "coletadas" (campanha por campanha), e **não** em ordem de ponto ou de parâmetro. Isso vai importar quando chegarmos ao `ORDER BY`.
+
+## Criar a tabela: tipos e a afinidade {#sec-p106-tabela}
+
+`CREATE TABLE` descreve a tabela: o nome e, para cada coluna, o nome, o tipo e as regras.
+
+```{python}
+#| label: p106-tabela
+banco.execute("""
+CREATE TABLE amostra (
+    id        INTEGER PRIMARY KEY,
+    ponto     TEXT NOT NULL,
+    data      TEXT NOT NULL CHECK (date(data) IS data),
+    parametro TEXT NOT NULL,
+    valor     REAL CHECK (valor IS NULL OR typeof(valor) IN ('real', 'integer')),
+    unidade   TEXT NOT NULL
+)
+""")
+print("tabelas no banco:", [linha[0] for linha in banco.execute("SELECT name FROM sqlite_master WHERE type = 'table'")])
+```
+
+Linha por linha:
+
+* `id INTEGER PRIMARY KEY`: a chave primária. No SQLite, uma coluna `INTEGER PRIMARY KEY` é numerada sozinha (1, 2, 3...) quando você não informa o valor. A grafia tem de ser exatamente `INTEGER`: com `INT PRIMARY KEY` a coluna **não** é numerada e guarda `NULL`. A numeração é "o maior `id` atual mais um", e por isso, se você apagar a última linha, o número é reaproveitado (o `AUTOINCREMENT` evita isso; não precisamos dele aqui).
+* `NOT NULL`: a coluna **não aceita** `NULL`. Ponto, data, parâmetro e unidade são obrigatórios; só o `valor` pode faltar.
+* `CHECK (date(data) IS data)`: a data precisa ser uma data ISO válida. O `IS` (e não `=`) é de propósito: a Armadilha 2 da Semana 4 (@sec-s4-restricoes) mostra por quê.
+* `CHECK (valor IS NULL OR typeof(valor) IN ('real', 'integer'))`: a coluna só aceita número (ou ausente). Veja a seguir por que precisamos disso.
+
+As restrições são o assunto do P1-08; aqui usamos só estas, para a tabela ser confiável desde o começo.
+
+### O tipo declarado é uma sugestão
+
+Cada **valor** guardado no SQLite pertence a uma de cinco classes: `NULL`, `INTEGER`, `REAL`, `TEXT` ou `BLOB` (bytes). O tipo que você escreve na coluna não é uma regra: vira uma **afinidade**, uma preferência de conversão. A documentação do SQLite (*Datatypes In SQLite*, sqlite.org/datatype3.html, consultada em 08/10/2026) resume: "the type is recommended, not required. Any column can still store any type of data." A afinidade sai do **nome** do tipo, por cinco regras, aplicadas em ordem:
+
+1. o nome contém `INT` → afinidade `INTEGER`;
+2. contém `CHAR`, `CLOB` ou `TEXT` → `TEXT`;
+3. contém `BLOB`, ou não há tipo → `BLOB` (sem conversão nenhuma);
+4. contém `REAL`, `FLOA` ou `DOUB` → `REAL`;
+5. senão → `NUMERIC`.
+
+Seguindo a regra 2 do método (construir a ferramenta uma vez a partir da regra e depois conferir o programa), escrevemos a regra em Python e a comparamos com o que o SQLite **realmente faz**: gravamos o texto `'3.0'` e o inteiro `3` numa coluna de cada tipo e olhamos o que foi guardado (`typeof`).
+
+```{python}
+#| label: p106-afinidade
+def afinidade(tipo_declarado):
+    """As cinco regras da documentação do SQLite, na ordem em que valem."""
+    t = tipo_declarado.upper()
+    if "INT" in t:
+        return "INTEGER"
+    if any(parte in t for parte in ("CHAR", "CLOB", "TEXT")):
+        return "TEXT"
+    if "BLOB" in t or t.strip() == "":
+        return "BLOB"
+    if any(parte in t for parte in ("REAL", "FLOA", "DOUB")):
+        return "REAL"
+    return "NUMERIC"
+
+
+def o_que_foi_guardado(tipo_declarado):
+    """Grava '3.0' (texto) e 3 (inteiro) numa coluna do tipo dado e devolve o typeof de cada um."""
+    lab = sqlite3.connect(":memory:")
+    lab.execute(f"CREATE TABLE t (x {tipo_declarado})")
+    lab.execute("INSERT INTO t VALUES ('3.0')")
+    lab.execute("INSERT INTO t VALUES (3)")
+    guardado = tuple(linha[0] for linha in lab.execute("SELECT typeof(x) FROM t ORDER BY rowid"))
+    lab.close()
+    return guardado
+
+
+# comportamento esperado de cada afinidade para ('3.0', 3); INTEGER e NUMERIC se comportam igual aqui
+ESPERADO = {"INTEGER": ("integer", "integer"), "NUMERIC": ("integer", "integer"),
+            "REAL": ("real", "real"), "TEXT": ("text", "text"), "BLOB": ("text", "integer")}
+TIPOS_DECLARADOS = ["INTEGER", "INT", "BIGINT", "POINT", "VARCHAR(30)", "TEXT", "DOUBLE PRECISION", "FLOAT",
+                    "REAL", "DECIMAL(5,2)", "NUMERIC", "BOOLEAN", "DATE", "STRING", "BLOB", ""]
+regra_confere = {}
+print("tipo declarado      afinidade   guardou para ('3.0', 3)      confere")
+for tipo in TIPOS_DECLARADOS:
+    guardado = o_que_foi_guardado(tipo)
+    regra_confere[tipo] = ESPERADO[afinidade(tipo)] == guardado
+    print(f"{tipo or '(sem tipo)':18} {afinidade(tipo):10} {str(guardado):26} {regra_confere[tipo]}")
+print("a regra bate com o SQLite em todos os tipos:", all(regra_confere.values()))
+
+# DECIMAL(5,2) não limita casas: a afinidade é só NUMERIC
+lab = sqlite3.connect(":memory:")
+lab.execute("CREATE TABLE d (x DECIMAL(5,2))")
+lab.execute("INSERT INTO d VALUES (12.345)")
+decimal_guardado = lab.execute("SELECT x FROM d").fetchone()[0]
+lab.close()
+print("DECIMAL(5,2) guardou 12.345 como:", decimal_guardado)
+```
+
+Como ler:
+
+* Nas colunas `INTEGER`, `NUMERIC` e afins, o texto `'3.0'` foi **convertido** em número (o inteiro 3, porque 3,0 cabe sem perda). Nas colunas `REAL`, virou o real 3,0. Em `TEXT`, o inteiro 3 virou o texto `'3'`. Em `BLOB` (ou sem tipo), nada foi convertido.
+* `POINT`, um nome que parece de geociência, tem afinidade **`INTEGER`**, porque contém a sequência `INT` (regra 1). E `DATE`, `BOOLEAN`, `DECIMAL(5,2)` e até `STRING` caem em `NUMERIC` (regra 5): **o SQLite não tem tipo de data nem tipo booleano**. Por isso a nossa coluna `data` é `TEXT`.
+* `DECIMAL(5,2)` não é um decimal exato: dá só a afinidade `NUMERIC`, sem limitar casas. (A última linha da saída mostra: gravar 12,345 numa coluna assim guarda 12,345.)
+
+Uma observação sobre o código acima: a função `o_que_foi_guardado` monta o `CREATE TABLE` com um f-string, isto é, o tipo entra no **texto** da consulta. O `?` só substitui **valores**, nunca nomes de tabela, de coluna ou de tipo, nem palavras do SQL; aqui não há alternativa. Isso só é seguro porque a lista de tipos é nossa, escrita no código. Um nome que viesse de um usuário teria de ser conferido contra uma lista de nomes permitidos antes de entrar na consulta.
+
+E o que acontece quando o valor **não pode** ser convertido? O SQLite o guarda **como veio**. Por isso a coluna `valor` tem a guarda `typeof(valor) IN ('real', 'integer')`. Comparamos três versões da mesma coluna, tentando gravar o texto `'abc'` e o texto `'12.4'`:
+
+```{python}
+#| label: p106-guarda
+def tentar(conexao, sql, parametros=()):
+    """Tenta executar e mostra se a linha ENTROU ou foi RECUSADA, com a mensagem do banco."""
+    try:
+        conexao.execute(sql, parametros)
+        return "ENTROU"
+    except sqlite3.Error as erro:
+        return f"RECUSADO ({erro})"
+
+
+lab = sqlite3.connect(":memory:")
+lab.execute("CREATE TABLE solta (valor REAL)")
+lab.execute("CREATE TABLE guardada (valor REAL CHECK (valor IS NULL OR typeof(valor) IN ('real', 'integer')))")
+tem_strict = sqlite3.sqlite_version_info >= (3, 37, 0)  # tabelas STRICT existem desde o SQLite 3.37.0 (2021-11-27)
+if tem_strict:
+    lab.execute("CREATE TABLE estrita (valor REAL) STRICT")
+
+resultados_guarda = {}
+for tabela in ("solta", "guardada") + (("estrita",) if tem_strict else ()):
+    for texto in ("abc", "12.4"):
+        resultados_guarda[(tabela, texto)] = tentar(lab, f"INSERT INTO {tabela} VALUES (?)", (texto,))
+        print(f"{tabela:9} {texto!r:7} -> {resultados_guarda[(tabela, texto)]}")
+print("guardado em 'solta':", lab.execute("SELECT valor, typeof(valor) FROM solta").fetchall())
+lab.close()
+```
+
+Leitura: na tabela `solta`, `'abc'` **entrou** e ficou guardado como texto, numa coluna "REAL". O `'12.4'` entrou nas três, mas já como o **número** 12,4. A `guardada` recusa o `'abc'` pelo `CHECK`. A tabela `STRICT` (disponível a partir do SQLite 3.37.0, de 27/11/2021, segundo a página *STRICT Tables*, sqlite.org/stricttables.html) recusa sozinha, sem precisar do `CHECK`: ela só aceita os tipos `INT`, `INTEGER`, `REAL`, `TEXT`, `BLOB` e `ANY` (este último aceita qualquer valor) e confere cada valor dos outros tipos. Neste livro usamos o `CHECK` com `typeof`, que funciona em qualquer versão, e deixamos `STRICT` como a opção moderna. Outros bancos, como o PostgreSQL, **impõem** o tipo declarado; o SQLite é um caso à parte, e merece este cuidado.
+
+## Inserir os dados {#sec-p106-inserir}
+
+`INSERT INTO tabela (colunas) VALUES (valores)` acrescenta uma linha. Como são 20, usamos `executemany`, que repete o mesmo comando para cada tupla da lista. Os pontos de interrogação (`?`) são **parâmetros**: o banco recebe o comando e os valores **separados**, e nunca confunde um com o outro (a injeção de SQL da @sec-s0-sql não acontece). Não informamos o `id`: o SQLite o numera.
+
+```{python}
+#| label: p106-inserir
+banco.executemany(
+    "INSERT INTO amostra (ponto, data, parametro, valor, unidade) VALUES (?, ?, ?, ?, ?)",
+    AMOSTRAS,
+)
+banco.commit()  # grava de fato; sem commit, outra conexão não veria as linhas
+total, com_valor = banco.execute("SELECT COUNT(*), COUNT(valor) FROM amostra").fetchone()
+print("linhas na tabela:", total, "| linhas com valor:", com_valor)
+```
+
+`COUNT(*)` conta linhas; `COUNT(valor)` conta só as que **têm** valor. A diferença (20 contra 19) é a nossa amostra perdida. O P1-07 explica contagens e médias com calma; por ora, guarde que o `NULL` fica de fora de `COUNT(coluna)`.
+
+Para olhar o resultado das consultas sem escrever o mesmo `for` toda hora, uma função pequena imprime o retorno como tabela de texto:
+
+```{python}
+#| label: p106-mostrar
+#| code-fold: true
+#| code-summary: "Ver a função mostrar()"
+def mostrar(sql, parametros=()):
+    """Roda a consulta, imprime o resultado como tabela de texto e devolve a lista de linhas (tuplas)."""
+    cursor = banco.execute(sql, parametros)
+    linhas = cursor.fetchall()
+    colunas = [c[0] for c in cursor.description]
+    texto = [["NULL" if v is None else str(v) for v in linha] for linha in linhas]
+    larguras = [max([len(c)] + [len(t[i]) for t in texto]) for i, c in enumerate(colunas)]
+    print("  ".join(c.ljust(w) for c, w in zip(colunas, larguras)))
+    print("  ".join("-" * w for w in larguras))
+    for t in texto:
+        print("  ".join(v.ljust(w) for v, w in zip(t, larguras)))
+    print(f"({len(linhas)} linha{'s' if len(linhas) != 1 else ''})")
+    return linhas
+```
+
+E a tabela inteira, uma única vez, para você ter os dados diante dos olhos (o `*` quer dizer "todas as colunas"; a próxima seção volta a ele). As consultas seguintes sempre voltam a estes dados:
+
+```{python}
+#| label: p106-tudo
+_ = mostrar("SELECT * FROM amostra")
+```
+
+Repare no `id` 18 (P02, 13/08/2024, turbidez): o valor é `NULL`, que o Python chama de `None` e que a função `mostrar()` escreve como `NULL`.
+
+## Perguntar: o SELECT {#sec-p106-select}
+
+Uma consulta é uma pergunta à tabela. Escrita, ela segue sempre esta ordem:
+
+```text
+SELECT  que colunas e contas mostrar
+FROM    de qual tabela
+WHERE   quais linhas entram
+ORDER BY  em que ordem
+LIMIT   quantas linhas
+```
+
+Mas o banco **não lê** nessa ordem. A leitura lógica é outra, e entendê-la explica a maioria dos erros de iniciante:
+
+```text
+ 1. FROM      de onde?              (a tabela inteira entra)
+ 2. WHERE     quais linhas ficam?   (as outras saem agora)
+ 3. SELECT    quais colunas e contas?
+ 4. DISTINCT  sem repetições?
+ 5. ORDER BY  em que ordem?
+ 6. LIMIT     quantas?
+```
+
+(Faltam aqui o `GROUP BY` e o `HAVING`, que entram entre o `WHERE` e o `SELECT` e ficam para o P1-07.) A documentação do SQLite (*SELECT*, sqlite.org/lang_select.html, consultada em 08/10/2026) descreve a ordem de processamento de uma consulta simples: primeiro o `FROM`, depois o `WHERE`, depois o cálculo das colunas do resultado, depois o `DISTINCT`, e trata o `ORDER BY` e o `LIMIT` à parte, no fim. Ela mesma avisa que isso é **ilustrativo**: nenhum banco precisa seguir esse caminho, desde que o resultado seja o mesmo. Para o nosso raciocínio basta a ordem lógica: como o `WHERE` vem **antes** do `SELECT`, no SQL padrão um apelido criado no `SELECT` ainda não existe dentro do `WHERE`; e como o `ORDER BY` vem **depois**, ele pode usá-lo. O PostgreSQL segue essa regra e recusa o apelido no `WHERE`; o SQLite o aceita por uma extensão sua (as duas respostas estão na @sec-p106-dialetos). Escreva como se o apelido não valesse no `WHERE`, e seu código roda nos dois.
+
+### Colunas e apelidos
+
+`SELECT *` traz todas as colunas (ótimo para explorar; evite em programas, porque o resultado muda quando a tabela ganha coluna). Escolher colunas e dar a elas um nome mais claro com `AS`:
+
+```{python}
+#| label: p106-colunas
+_ = mostrar("SELECT ponto AS local, data, valor AS od_mg_l FROM amostra WHERE parametro = 'OD'")
+```
+
+Sete amostras de OD, na ordem em que foram gravadas (por enquanto, sem nenhuma promessa sobre ela).
+
+### WHERE: quais linhas entram
+
+O `WHERE` guarda só as linhas em que a condição é **verdadeira**. As comparações são `=` (um sinal só, ao contrário do `==` do Python), `<>` ou `!=` (diferente), `<`, `<=`, `>` e `>=`. Condições se combinam com `AND`, `OR` e `NOT`. Atenção à precedência (SQLite, *Expressions*, sqlite.org/lang_expr.html): `NOT` é resolvido primeiro, depois `AND`, depois `OR`. Duas consultas quase iguais, com resultados bem diferentes:
+
+```{python}
+#| label: p106-precedencia
+print("sem parênteses:  parametro = 'pH' AND valor < 6.5 OR valor > 100")
+sem_parenteses = mostrar("""
+SELECT id, ponto, data, parametro, valor FROM amostra
+WHERE parametro = 'pH' AND valor < 6.5 OR valor > 100
+""")
+print()
+print("com parênteses: parametro = 'pH' AND (valor < 6.5 OR valor > 100)")
+com_parenteses = mostrar("""
+SELECT id, ponto, data, parametro, valor FROM amostra
+WHERE parametro = 'pH' AND (valor < 6.5 OR valor > 100)
+""")
+```
+
+Sem parênteses, o `AND` é resolvido antes do `OR`; a consulta ficou "(pH e abaixo de 6,5) **ou** (qualquer parâmetro acima de 100)". Por isso apareceu uma linha de **turbidez** (135 UNT) entre os pHs: 3 linhas. Com parênteses, a pergunta é a que queríamos, e só 2 linhas passam. **Regra:** misturou `AND` com `OR`, use parênteses, mesmo quando "dá certo sem".
+
+Três atalhos que deixam o `WHERE` mais curto:
+
+* `x IN (a, b, c)`: o mesmo que `x = a OR x = b OR x = c`;
+* `x BETWEEN a AND b`: o mesmo que `x >= a AND x <= b`, ou seja, **inclui** os dois extremos;
+* `x LIKE 'padrão'`: `%` vale por qualquer sequência de caracteres e `_` por um caractere só.
+
+```{python}
+#| label: p106-atalhos
+print("IN: OD em P01 e P03")
+em_p01_p03 = mostrar("SELECT ponto, data, valor FROM amostra WHERE parametro = 'OD' AND ponto IN ('P01', 'P03')")
+print()
+print("BETWEEN é inclusivo nos dois extremos (1 = verdadeiro, 0 = falso):")
+extremos = mostrar("SELECT 6.0 BETWEEN 6.0 AND 9.0 AS extremo_baixo, 9.0 BETWEEN 6.0 AND 9.0 AS extremo_alto, 5.99 BETWEEN 6.0 AND 9.0 AS abaixo")
+print()
+print("LIKE: no SQLite, maiúsculas e minúsculas contam como iguais (para letras ASCII)")
+com_like = mostrar("SELECT COUNT(*) AS linhas_de_turbidez FROM amostra WHERE parametro LIKE 'TUR%'")
+```
+
+O `LIKE 'TUR%'` achou as linhas de `turbidez` (minúscula) porque, segundo a documentação, o SQLite trata maiúsculas e minúsculas ASCII como iguais no `LIKE`. Cuidado: o **PostgreSQL não** (a @sec-p106-dialetos mostra), e cada banco tem a sua regra.
+
+*E se?* Mude `IN ('P01', 'P03')` para `NOT IN ('P01', 'P03')` e preveja o resultado antes de rodar. Quantas linhas de OD sobram? Rode e confira.
+
+### ORDER BY, LIMIT e DISTINCT
+
+O banco **não promete** nenhuma ordem se você não pedir. Em geral devolve na ordem de gravação, mas isso é coincidência de implementação, não garantia. `ORDER BY` pede a ordem: crescente por padrão (`ASC`), decrescente com `DESC`, e com várias colunas o desempate vai da esquerda para a direita. `LIMIT n` devolve só as primeiras `n` linhas **da ordem pedida**, e `OFFSET m` pula as `m` primeiras:
+
+```{python}
+#| label: p106-ordem
+print("os 3 menores OD (do menor para o maior):")
+tres_menores = mostrar("SELECT ponto, data, valor FROM amostra WHERE parametro = 'OD' ORDER BY valor LIMIT 3")
+print()
+print("os 3 seguintes (LIMIT 3 OFFSET 3):")
+tres_seguintes = mostrar("SELECT ponto, data, valor FROM amostra WHERE parametro = 'OD' ORDER BY valor LIMIT 3 OFFSET 3")
+print()
+print("ordem por ponto e, dentro do ponto, da data mais recente para a mais antiga:")
+por_ponto_data = mostrar("SELECT ponto, data, valor FROM amostra WHERE parametro = 'OD' ORDER BY ponto, data DESC")
+```
+
+`LIMIT` sem `ORDER BY` devolve "umas n linhas quaisquer": a pergunta "qual é a pior amostra?" só tem resposta com a ordem declarada.
+
+`DISTINCT` remove linhas repetidas **do resultado**, olhando a combinação de todas as colunas escolhidas:
+
+```{python}
+#| label: p106-distinct
+print("parâmetros distintos:")
+parametros = mostrar("SELECT DISTINCT parametro FROM amostra ORDER BY parametro")
+print()
+print("combinações distintas de data e ponto (cada ponto-campanha aparece uma vez):")
+combinacoes = mostrar("SELECT DISTINCT data, ponto FROM amostra ORDER BY data, ponto")
+```
+
+Cada campanha tem pelo menos P01 e P02; só a de agosto tem também o P03. São 7 combinações de data e ponto, embora a tabela tenha 20 linhas.
+
+## NULL e a lógica de três valores {#sec-p106-null}
+
+`NULL` quer dizer "não sei". Não é zero, nem texto vazio, nem "n/d". Por isso, uma comparação com `NULL` não pode dar verdadeiro nem falso: dá **desconhecido**. O SQL, portanto, trabalha com **três** valores de verdade: verdadeiro, falso e desconhecido (que o SQLite escreve como `NULL`).
+
+Seguindo a regra 2 do método, vamos construir essa lógica a partir de três regras e só depois conferir o SQLite:
+
+* **E:** se um dos lados é falso, o resultado é falso (mesmo que o outro seja desconhecido); senão, se algum lado é desconhecido, o resultado é desconhecido; senão, é verdadeiro.
+* **OU:** se um dos lados é verdadeiro, é verdadeiro; senão, se algum lado é desconhecido, é desconhecido; senão, é falso.
+* **NÃO:** troca verdadeiro por falso e vice-versa; o desconhecido continua desconhecido.
+
+```{python}
+#| label: p106-tres-valores
+# 1 = verdadeiro, 0 = falso, None = desconhecido (NULL)
+def nao3(a):
+    return None if a is None else 1 - a
+
+
+def e3(a, b):
+    if a == 0 or b == 0:
+        return 0
+    if a is None or b is None:
+        return None
+    return 1
+
+
+def ou3(a, b):
+    if a == 1 or b == 1:
+        return 1
+    if a is None or b is None:
+        return None
+    return 0
+
+
+VALORES = (1, 0, None)
+divergencias = []
+combinacoes_conferidas = 0
+for a, b in product(VALORES, repeat=2):
+    for operador, funcao in (("AND", e3), ("OR", ou3)):
+        no_sqlite = banco.execute(f"SELECT ? {operador} ?", (a, b)).fetchone()[0]
+        combinacoes_conferidas += 1
+        if no_sqlite != funcao(a, b):
+            divergencias.append((operador, a, b))
+for a in VALORES:
+    combinacoes_conferidas += 1
+    if banco.execute("SELECT NOT ?", (a,)).fetchone()[0] != nao3(a):
+        divergencias.append(("NOT", a))
+print(f"{combinacoes_conferidas} combinações conferidas; divergências com o SQLite: {divergencias}")
+
+nome = {1: "V", 0: "F", None: "?"}
+for titulo, funcao in (("E", e3), ("OU", ou3)):
+    print(f"\n{titulo}   " + "  ".join(nome[b] for b in VALORES))
+    for a in VALORES:
+        print(f"  {nome[a]}  " + "  ".join(nome[funcao(a, b)] for b in VALORES))
+print("\nNÃO: V->" + nome[nao3(1)] + "  F->" + nome[nao3(0)] + "  ?->" + nome[nao3(None)])
+```
+
+(V = verdadeiro, F = falso, ? = desconhecido; a linha é o lado esquerdo e a coluna, o direito.) As 21 combinações (9 de `AND`, 9 de `OR` e 3 de `NOT`) batem com o SQLite. Duas leituras importantes da tabela: `F E ?` dá **falso**, e `V OU ?` dá **verdadeiro**, porque o outro lado já decide; mas `V E ?` e `F OU ?` continuam **desconhecidos**.
+
+E o que o `WHERE` faz com o desconhecido? Descarta, como se fosse falso: **só as linhas em que a condição é verdadeira entram**. Daí vêm as armadilhas:
+
+```{python}
+#| label: p106-null-where
+print("1) comparar com NULL pelo = : o banco responde sem erro, e com zero linhas")
+igual_null = mostrar("SELECT id FROM amostra WHERE valor = NULL")
+print()
+print("2) o jeito certo: IS NULL")
+e_nulo = mostrar("SELECT id, ponto, data, parametro FROM amostra WHERE valor IS NULL")
+print()
+print("3) as duas metades de 'acima / não acima do limite' NÃO somam o todo:")
+acima = banco.execute("SELECT COUNT(*) FROM amostra WHERE parametro = 'turbidez' AND valor > ?", (TURBIDEZ_MAXIMA_UNT,)).fetchone()[0]
+dentro = banco.execute("SELECT COUNT(*) FROM amostra WHERE parametro = 'turbidez' AND valor <= ?", (TURBIDEZ_MAXIMA_UNT,)).fetchone()[0]
+todas_de_turbidez = banco.execute("SELECT COUNT(*) FROM amostra WHERE parametro = 'turbidez'").fetchone()[0]
+print(f"   acima: {acima} | dentro (<=): {dentro} | soma: {acima + dentro} | turbidez na tabela: {todas_de_turbidez}")
+nao_acima = banco.execute("SELECT COUNT(*) FROM amostra WHERE parametro = 'turbidez' AND NOT (valor > ?)", (TURBIDEZ_MAXIMA_UNT,)).fetchone()[0]
+print(f"   NOT (valor > 100) também deixa o NULL de fora: {nao_acima} linhas")
+print()
+print("4) <> descarta o NULL; IS NOT não (comparação 'segura para NULL'):")
+diferente = banco.execute("SELECT COUNT(*) FROM amostra WHERE parametro = 'turbidez' AND valor <> 135.0").fetchone()[0]
+is_not = banco.execute("SELECT COUNT(*) FROM amostra WHERE parametro = 'turbidez' AND valor IS NOT 135.0").fetchone()[0]
+print(f"   valor <> 135: {diferente} linhas | valor IS NOT 135: {is_not} linhas")
+```
+
+Leitura: (1) `= NULL` devolve **zero linhas, sem aviso**: o banco responde com serenidade a uma pergunta que não faz sentido. (2) `IS NULL` acha a amostra perdida. (3) Das 6 amostras de turbidez, 1 passa de 100 UNT e 4 ficam dentro do limite: 1 + 4 = 5, não 6. A sexta (a sem resultado) não é "acima" nem "dentro", é **desconhecida**, e some das duas respostas. E `NOT (valor > 100)` não resolve, porque o `NOT` de desconhecido é desconhecido. (4) `<>` perde o `NULL`; `IS NOT` o inclui. Em relatório de qualidade da água, é a diferença entre "4 amostras conformes" e "4 conformes, 1 acima do limite e **1 sem resultado**".
+
+**E no `CHECK`?** O `CHECK` segue a regra **oposta** à do `WHERE`: ele só recusa a linha quando a condição dá **falso**; se der desconhecido, a linha **entra**. Por isso a coluna `data` da nossa tabela usa `IS` e não `=`:
+
+```{python}
+#| label: p106-check-null
+lab = sqlite3.connect(":memory:")
+lab.execute("CREATE TABLE com_igual (data TEXT CHECK (date(data) = data))")
+lab.execute("CREATE TABLE com_is (data TEXT CHECK (date(data) IS data))")
+check_com_igual = tentar(lab, "INSERT INTO com_igual VALUES ('abc')")
+check_com_is = tentar(lab, "INSERT INTO com_is VALUES ('abc')")
+lab.close()
+print("CHECK (date(data) = data):  inserir 'abc' ->", check_com_igual)
+print("CHECK (date(data) IS data): inserir 'abc' ->", check_com_is)
+```
+
+`date('abc')` é `NULL`; `NULL = 'abc'` é desconhecido, e o `CHECK` deixa a linha passar: a data `'abc'` **entrou**. Com `IS`, a comparação dá falso e a linha é recusada. A mesma condição, duas regras: no `WHERE`, desconhecido descarta; no `CHECK`, desconhecido aprova.
+
+O `NULL` também aparece na ordenação e na repetição:
+
+* **Ordem:** segundo a documentação do SQLite, `NULL` é tratado como **menor que qualquer outro valor** para ordenar: aparece **no começo** de um `ASC` e **no fim** de um `DESC`. (Em outros bancos pode ser o contrário.)
+* **DISTINCT:** dois `NULL` são considerados **iguais** para remover repetições.
+
+```{python}
+#| label: p106-null-ordem
+print("ASC (o NULL vem primeiro):")
+turbidez_asc = mostrar("SELECT ponto, data, valor FROM amostra WHERE parametro = 'turbidez' ORDER BY valor")
+print()
+print("DESC (o NULL vem por último):")
+turbidez_desc = mostrar("SELECT ponto, data, valor FROM amostra WHERE parametro = 'turbidez' ORDER BY valor DESC")
+```
+
+Por fim, o `COALESCE(a, b, ...)` devolve o primeiro valor que **não** é `NULL`. É ótimo para **mostrar** ("sem resultado" no lugar de vazio) e **perigoso para calcular**: trocar o ausente por zero é afirmar que a turbidez *foi medida e deu zero*. Veja o efeito na média (o `AVG` é assunto do P1-07; aqui só importa o contraste):
+
+```{python}
+#| label: p106-coalesce
+media_correta = banco.execute("SELECT ROUND(AVG(valor), 1) FROM amostra WHERE parametro = 'turbidez'").fetchone()[0]
+media_com_zero = banco.execute("SELECT ROUND(AVG(COALESCE(valor, 0)), 1) FROM amostra WHERE parametro = 'turbidez'").fetchone()[0]
+medidos = [v for _p, _d, par, v, _u in AMOSTRAS if par == "turbidez" and v is not None]
+print("média das 5 amostras medidas (o AVG ignora o NULL):", media_correta, "UNT")
+print("média com o ausente tratado como zero:             ", media_com_zero, "UNT")
+print("conferência em Python:", round(sum(medidos) / len(medidos), 1), "UNT")
+```
+
+A média correta é 46,8 UNT (234 dividido por 5); a "média com zero" cai para 39,0 (234 dividido por 6). Tratar o ausente como zero **subestima** a turbidez em cerca de 17%, sem nenhum aviso. Ausente é "não sabemos", e a consulta tem de respeitar isso.
+
+## Expressões e funções escalares {#sec-p106-funcoes}
+
+Em qualquer lugar onde cabe uma coluna cabe uma **expressão**: uma conta, uma chamada de função, um `CASE`. As funções *escalares* recebem valores de **uma linha** e devolvem um valor (as de *agregação*, que juntam várias linhas, são do P1-07).
+
+**Contas.** Cuidado com a divisão: quando os **dois** lados são inteiros, o resultado é inteiro, e a parte decimal é cortada (a documentação diz: "truncated toward zero"):
+
+```{python}
+#| label: p106-divisao
+divisoes = mostrar("SELECT 7 / 2 AS inteira, 7 / 2.0 AS real, 7 % 2 AS resto, -7 / 2 AS negativa_sql")
+print("em Python: 7 / 2 =", 7 / 2, "| 7 // 2 =", 7 // 2, "| -7 // 2 =", -7 // 2, "| trunc(-7 / 2) =", math.trunc(-7 / 2))
+```
+
+`7 / 2` deu **3**, e `7 / 2.0` deu 3,5. E repare em `-7 / 2`: o SQL dá **-3** (corta para o lado do zero), enquanto o `//` do Python dá **-4** (arredonda para baixo). Para a divisão "de verdade", faça pelo menos um dos lados ser real (`2.0`, ou `CAST(x AS REAL)`).
+
+**Arredondar e decidir.** `ROUND(x, n)` arredonda para `n` casas. `CASE WHEN ... THEN ... ELSE ... END` escolhe um valor conforme condições, como um `if` dentro da consulta. Aqui, a *folga* do OD em relação ao mínimo da classe 2 e uma etiqueta:
+
+```{python}
+#| label: p106-case
+folga = mostrar("""
+SELECT ponto, data, valor,
+       ROUND(valor - 5.0, 1) AS folga_mg_l,
+       CASE WHEN valor >= 5.0 THEN 'conforme' ELSE 'abaixo do mínimo' END AS situacao
+FROM amostra
+WHERE parametro = 'OD'
+ORDER BY valor
+""")
+```
+
+(Escrevemos `5.0` à mão só para ler a consulta; no código de verdade, o valor vem de `OD_MINIMO_MG_L`, como veremos na prática.) Folga negativa é a distância abaixo do mínimo: P02 ficou 0,2 mg/L abaixo em maio e 1,1 mg/L abaixo em agosto.
+
+**Texto e `NULL`.** `||` junta textos, e `upper()`, `lower()`, `length()` fazem o que o nome diz. Uma armadilha: juntar qualquer coisa com `NULL` dá `NULL`.
+
+```{python}
+#| label: p106-texto
+etiquetas = mostrar("""
+SELECT ponto || ' · ' || parametro AS etiqueta,
+       ponto || ' · ' || valor      AS etiqueta_com_valor
+FROM amostra
+WHERE parametro = 'turbidez' AND ponto = 'P02'
+ORDER BY data
+""")
+```
+
+Na amostra perdida (a terceira linha), `ponto || ' · ' || valor` virou `NULL` inteiro, não "P02 · NULL". Se precisar do texto, use `COALESCE(valor, 'sem resultado')`.
+
+**Datas.** Com datas ISO, o SQLite oferece `date()`, `strftime()` e `julianday()` (SQLite, *Date And Time Functions*, sqlite.org/lang_datefunc.html, consultada em 08/10/2026). `strftime('%Y', data)` devolve o ano, `%m` o mês (01 a 12) e `%j` o dia do ano (001 a 366), **sempre como texto**; `julianday(data)` é um número de dias, e a diferença entre dois deles é a quantidade de dias entre as datas. Uma data em formato inválido dá `NULL`, e um dia que não existe no mês (30 de fevereiro) é **normalizado** em vez de recusado (a @sec-p106-dialetos mostra). Conferindo contra o módulo `datetime` do Python:
+
+```{python}
+#| label: p106-datas-sql
+datas_sql = mostrar("""
+SELECT DISTINCT data,
+       strftime('%Y', data) AS ano,
+       strftime('%m', data) AS mes,
+       strftime('%j', data) AS dia_do_ano,
+       CAST(ROUND(julianday(data) - julianday('2024-02-20')) AS INTEGER) AS dias_desde_a_1a_campanha
+FROM amostra
+ORDER BY data
+""")
+primeira = datetime.date(2024, 2, 20)
+datas_py = [
+    (d, f"{dt.year:04d}", f"{dt.month:02d}", f"{dt.timetuple().tm_yday:03d}", (dt - primeira).days)
+    for d in sorted({a[1] for a in AMOSTRAS})
+    for dt in [datetime.date.fromisoformat(d)]
+]
+print("SQL e Python concordam nas datas:", datas_sql == datas_py)
+```
+
+A segunda campanha veio 84 dias (12 semanas) depois da primeira, e a terceira, 175 dias depois (25 semanas). (O `ROUND` dentro do `CAST` é uma proteção: o `julianday` é um número real, e uma diferença como 83,9999... seria cortada para 83 pelo `CAST`.) E o `strftime('%m')` devolve o texto `'05'`, não o número 5; para fazer conta, use `CAST(strftime('%m', data) AS INTEGER)`.
+
+**Tipo guardado.** `typeof(x)` mostra a classe do valor realmente guardado, e `CAST(x AS tipo)` converte. É a ferramenta para investigar a tabela quando algo parece estranho:
+
+```{python}
+#| label: p106-typeof
+tipos_guardados = mostrar("SELECT DISTINCT typeof(valor) AS tipo_guardado FROM amostra ORDER BY tipo_guardado")
+cast_exemplo = mostrar("SELECT CAST('12.4' AS REAL) AS texto_para_real, CAST(7.9 AS INTEGER) AS real_para_inteiro")
+```
+
+Na coluna `valor` só há `null` (a amostra perdida) e `real`: a guarda funcionou. E atenção: `CAST(7.9 AS INTEGER)` **corta** para 7, não arredonda; para arredondar, `ROUND` antes.
+
+## Prática: cinco perguntas, cada uma conferida {#sec-p106-pratica}
+
+Agora juntamos tudo. Para cada pergunta sobre a campanha, fazemos **duas** coisas independentes: a consulta em SQL e o mesmo cálculo em Python, sobre a lista `AMOSTRAS` original (não sobre o banco). Se as duas respostas coincidem, temos confiança; se não, um dos dois está errado, e descobrir qual é o trabalho. Dessa vez os limites vêm das **constantes nomeadas**, passadas como parâmetros `?`, e não escritos à mão dentro do texto da consulta.
+
+Um dicionário, `conferencias`, guarda o resultado de cada comparação.
+
+**Pergunta 1. Quando o oxigênio dissolvido ficou abaixo do mínimo?**
+
+```{python}
+#| label: p106-q1
+conferencias = {}
+
+sql_q1 = """
+SELECT ponto, data, valor FROM amostra
+WHERE parametro = 'OD' AND valor < ?
+ORDER BY data, ponto
+"""
+q1_sql = mostrar(sql_q1, (OD_MINIMO_MG_L,))
+q1_python = sorted(
+    ((ponto, data, valor) for ponto, data, parametro, valor, _u in AMOSTRAS
+     if parametro == "OD" and valor is not None and valor < OD_MINIMO_MG_L),
+    key=lambda t: (t[1], t[0]),
+)
+conferencias["q1"] = q1_sql == q1_python
+print("SQL e Python concordam:", conferencias["q1"])
+```
+
+Duas amostras, **ambas em P02**: 4,8 mg/L em maio e 3,9 mg/L em agosto. Em fevereiro, P02 teve 6,1 (acima do mínimo).
+
+**Pergunta 2. Quais amostras de pH estão fora da faixa de 6,0 a 9,0?**
+
+```{python}
+#| label: p106-q2
+sql_q2 = """
+SELECT ponto, data, valor FROM amostra
+WHERE parametro = 'pH' AND (valor < ? OR valor > ?)
+ORDER BY data, ponto
+"""
+q2_sql = mostrar(sql_q2, (PH_MINIMO, PH_MAXIMO))
+q2_python = sorted(
+    ((ponto, data, valor) for ponto, data, parametro, valor, _u in AMOSTRAS
+     if parametro == "pH" and valor is not None and (valor < PH_MINIMO or valor > PH_MAXIMO)),
+    key=lambda t: (t[1], t[0]),
+)
+conferencias["q2"] = q2_sql == q2_python
+print("SQL e Python concordam:", conferencias["q2"])
+```
+
+Só uma: o pH 5,8 de P02, em agosto. O 6,3 de P02 em maio **passa** (está acima de 6,0). Repare nos parênteses em volta do `OR`: sem eles, o `AND` seria resolvido antes e a faixa não valeria para o `pH` (a lição da @sec-p106-select).
+
+**Pergunta 3. Quais são as três maiores turbidezes?**
+
+```{python}
+#| label: p106-q3
+sql_q3 = """
+SELECT ponto, data, valor FROM amostra
+WHERE parametro = 'turbidez' AND valor IS NOT NULL
+ORDER BY valor DESC
+LIMIT 3
+"""
+q3_sql = mostrar(sql_q3)
+medidas_de_turbidez = [(p, d, v) for p, d, par, v, _u in AMOSTRAS if par == "turbidez" and v is not None]
+q3_python = sorted(medidas_de_turbidez, key=lambda t: -t[2])[:3]
+conferencias["q3"] = q3_sql == q3_python
+print("SQL e Python concordam:", conferencias["q3"])
+
+print()
+print("E as TRÊS MENORES? O mesmo molde, só sem o DESC:")
+q3_menores_ingenuo = mostrar("SELECT ponto, data, valor FROM amostra WHERE parametro = 'turbidez' ORDER BY valor LIMIT 3")
+print()
+print("Correção: tirar o NULL antes de ordenar.")
+q3_menores = mostrar("SELECT ponto, data, valor FROM amostra WHERE parametro = 'turbidez' AND valor IS NOT NULL ORDER BY valor LIMIT 3")
+q3_menores_python = sorted(medidas_de_turbidez, key=lambda t: t[2])[:3]
+conferencias["q3_menores"] = q3_menores == q3_menores_python
+print("SQL corrigido e Python concordam:", conferencias["q3_menores"])
+
+if sqlite3.sqlite_version_info >= (3, 30, 0):  # NULLS FIRST e NULLS LAST existem desde o SQLite 3.30.0
+    print()
+    print("Outro jeito: dizer onde o NULL fica, na própria ordenação (NULLS LAST):")
+    q3_nulls_last = mostrar("SELECT ponto, data, valor FROM amostra WHERE parametro = 'turbidez' ORDER BY valor NULLS LAST LIMIT 3")
+    conferencias["q3_nulls_last"] = q3_nulls_last == q3_menores_python
+    print("SQL com NULLS LAST e Python concordam:", conferencias["q3_nulls_last"])
+```
+
+As três maiores (135, 60 e 18 UNT) vieram certas, e repare que a consulta já exclui o ausente (`valor IS NOT NULL`). Sem isso, o resultado dependeria de onde o banco põe o `NULL`: no fim de um `DESC` no SQLite, mas no **começo** no PostgreSQL (a @sec-p106-dialetos mostra). Já no `ORDER BY valor LIMIT 3` crescente e sem o filtro, o `NULL` aparece **primeiro** no SQLite e ocupa uma das três vagas: a "menor turbidez" virou "amostra sem resultado". O molde era o mesmo, o resultado quase certo, e **sem erro nenhum**. Foi a conferência com o Python que mostraria isso. A correção é decidir, na consulta, o que fazer com o ausente: `valor IS NOT NULL`, ou então dizer onde ele fica com `ORDER BY valor NULLS LAST` (SQLite 3.30 ou mais novo; o PostgreSQL também aceita), que não depende do padrão de cada banco.
+
+**Pergunta 4. Em cada amostra de turbidez: acima, dentro do limite ou sem resultado?**
+
+```{python}
+#| label: p106-q4
+sql_q4 = """
+SELECT ponto, data, valor,
+       CASE WHEN valor IS NULL THEN 'sem resultado'
+            WHEN valor > ?      THEN 'acima do limite'
+            ELSE                     'dentro do limite'
+       END AS situacao
+FROM amostra
+WHERE parametro = 'turbidez'
+ORDER BY data, ponto
+"""
+q4_sql = mostrar(sql_q4, (TURBIDEZ_MAXIMA_UNT,))
+
+
+def situacao_da_turbidez(valor):
+    if valor is None:
+        return "sem resultado"
+    return "acima do limite" if valor > TURBIDEZ_MAXIMA_UNT else "dentro do limite"
+
+
+q4_python = sorted(
+    ((ponto, data, valor, situacao_da_turbidez(valor)) for ponto, data, parametro, valor, _u in AMOSTRAS
+     if parametro == "turbidez"),
+    key=lambda t: (t[1], t[0]),
+)
+conferencias["q4"] = q4_sql == q4_python
+contagem_q4 = {s: sum(1 for linha in q4_sql if linha[3] == s) for s in ("acima do limite", "dentro do limite", "sem resultado")}
+print("SQL e Python concordam:", conferencias["q4"])
+print("contagem por situação:", contagem_q4, "| soma:", sum(contagem_q4.values()))
+
+# o CASE "ingênuo", sem o ramo do NULL: o ausente cai no ELSE
+dentro_sem_ramo_nulo = banco.execute(
+    "SELECT COUNT(*) FROM amostra WHERE parametro = 'turbidez' "
+    "AND (CASE WHEN valor > ? THEN 'acima do limite' ELSE 'dentro do limite' END) = 'dentro do limite'",
+    (TURBIDEZ_MAXIMA_UNT,),
+).fetchone()[0]
+print("sem o ramo do NULL, o CASE conta", dentro_sem_ramo_nulo, "amostras 'dentro do limite' (o certo são", contagem_q4["dentro do limite"], ")")
+```
+
+Agora as três classes **somam as 6 amostras** (1 + 4 + 1), ao contrário da divisão em "acima" e "dentro" da seção do `NULL`. O que mudou? Há um ramo **explícito** para o ausente (`WHEN valor IS NULL`). O `CASE` testa as condições na ordem e para na primeira verdadeira; como `NULL > 100` é desconhecido (não é verdadeiro), o ausente passa por todas as comparações sem ser pego e cairia no `ELSE`. Sem o ramo do `NULL`, o `ELSE` o classificaria como "dentro do limite": a saída acima mostra o `CASE` ingênuo contando **5** amostras como "dentro do limite" em vez de 4, e uma amostra que **nunca foi medida** passaria por conforme. Pôr o ramo do `NULL` **primeiro** não é obrigatório (antes do `ELSE`, o resultado seria o mesmo), mas é um bom hábito: quem lê a consulta vê o ausente tratado antes de qualquer comparação.
+
+**Pergunta 5. Quanto de folga (ou falta) o OD teve em cada amostra, por ponto?**
+
+```{python}
+#| label: p106-q5
+sql_q5 = """
+SELECT ponto, data, CAST(strftime('%m', data) AS INTEGER) AS mes, valor,
+       ROUND(valor - :minimo, 1) AS folga_mg_l,
+       CASE WHEN valor >= :minimo THEN 'conforme' ELSE 'abaixo do mínimo' END AS situacao
+FROM amostra
+WHERE parametro = 'OD'
+ORDER BY ponto, data
+"""
+q5_sql = mostrar(sql_q5, {"minimo": OD_MINIMO_MG_L})
+q5_python = sorted(
+    ((ponto, data, datetime.date.fromisoformat(data).month, valor, round(valor - OD_MINIMO_MG_L, 1),
+      "conforme" if valor >= OD_MINIMO_MG_L else "abaixo do mínimo")
+     for ponto, data, parametro, valor, _u in AMOSTRAS if parametro == "OD"),
+    key=lambda t: (t[0], t[1]),
+)
+conferencias["q5"] = q5_sql == q5_python
+print("SQL e Python concordam:", conferencias["q5"])
+print("todas as conferências:", conferencias)
+```
+
+Novidade: `:minimo` é um **parâmetro nomeado**. O valor vem de um dicionário (`{"minimo": ...}`), e o mesmo nome pode aparecer em vários lugares da consulta (aqui, na folga e no `CASE`) com o valor passado **uma vez**. Se o limite mudar, muda uma constante só, e a consulta e o teste mudam juntos.
+
+Para ver o conjunto, um gráfico do OD por ponto, com o mínimo da classe 2 como linha de referência. Os dados vêm da consulta, não da lista Python:
+
+```{python}
+#| label: fig-p106-od
+#| fig-cap: "Oxigênio dissolvido em cada campanha, por ponto (dados sintéticos). A linha tracejada é o mínimo de 5 mg/L da classe 2 (CONAMA 357/2005). P02, a jusante do lançamento, fica abaixo da linha em maio e em agosto; P01 e P03 ficam sempre acima."
+dados_od = banco.execute("SELECT ponto, data, valor FROM amostra WHERE parametro = 'OD' ORDER BY ponto, data").fetchall()
+
+fig, ax = plt.subplots(figsize=(7.5, 4))
+for ponto, cor, marcador in (("P01", "#1b6ca8", "o"), ("P02", "#d55e00", "s"), ("P03", "#009e73", "^")):
+    datas = [datetime.date.fromisoformat(d) for p, d, _v in dados_od if p == ponto]
+    valores = [v for p, _d, v in dados_od if p == ponto]
+    ax.plot(datas, valores, marker=marcador, color=cor, label=ponto)
+ax.axhline(OD_MINIMO_MG_L, color="#555555", linestyle="--", linewidth=1.3)
+ax.text(datetime.date(2024, 2, 10), OD_MINIMO_MG_L - 0.35, "mínimo da classe 2: 5 mg/L", fontsize=8.5, color="#333333")
+campanhas = sorted({datetime.date.fromisoformat(d) for _p, d, _v in dados_od})
+ax.set_xticks(campanhas)
+ax.set_xticklabels([c.strftime("%d/%m/%Y") for c in campanhas])
+ax.set_xlim(datetime.date(2024, 2, 1), datetime.date(2024, 9, 1))
+ax.set_xlabel("data da campanha")
+ax.set_ylabel("oxigênio dissolvido (mg/L)")
+ax.set_ylim(3, 8.5)
+ax.legend(title="ponto", loc="center left", bbox_to_anchor=(1.02, 0.5))
+plt.show()
+
+pontos_abaixo_no_grafico = sum(1 for _p, _d, v in dados_od if v < OD_MINIMO_MG_L)
+print("pontos abaixo da linha no gráfico:", pontos_abaixo_no_grafico)
+```
+
+A @fig-p106-od confirma o que as consultas disseram: dois pontos abaixo da linha, ambos de P02, e um P02 que **piora** a cada campanha (6,1; 4,8; 3,9). Lembre: os números são sintéticos; o "a jusante do lançamento" é o que desenhamos nos dados para ter algo a investigar.
+
+## Dialetos: o que muda de um banco para outro {#sec-p106-dialetos}
+
+O SQL é um **padrão**, mas cada banco o implementa a seu modo, com extensões e escolhas próprias. O SQLite é muito tolerante; o PostgreSQL, mais estrito. Quando chegar o momento de levar o seu banco para um servidor (o P3-12 faz isso), os pontos abaixo são os primeiros que quebram. Para cada "sonda" abaixo, o SQLite é executado **aqui, ao vivo**; o PostgreSQL é um **registro** de uma execução real que fiz em 08/10/2026 (versão 16.15, no Linux, em um servidor local) e que o capítulo **não reexecuta**: ele só o exibe.
+
+```{python}
+#| label: p106-dialetos
+def resultado_no_sqlite(sql):
+    """Roda uma consulta de uma linha e devolve o primeiro valor como texto (ou a mensagem de erro)."""
+    try:
+        linhas = banco.execute(sql).fetchall()
+    except sqlite3.Error as erro:
+        return "ERRO: " + str(erro)
+    valor = linhas[0][0]
+    return "NULL" if valor is None else str(valor)
+
+
+# (chave, o que se testa, consulta no SQLite)
+SONDAS = [
+    ("div_inteira", "7 / 2", "SELECT 7 / 2"),
+    ("div_real", "7 / 2.0", "SELECT 7 / 2.0"),
+    ("div_zero", "1 / 0", "SELECT 1 / 0"),
+    ("cast_positivo", "CAST(7.9 AS INTEGER)", "SELECT CAST(7.9 AS INTEGER)"),
+    ("cast_negativo", "CAST(-7.5 AS INTEGER)", "SELECT CAST(-7.5 AS INTEGER)"),
+    ("like_caixa", "'ABC' LIKE 'abc'", "SELECT CASE WHEN 'ABC' LIKE 'abc' THEN 'verdadeiro' ELSE 'falso' END"),
+    ("null_igual", "NULL = NULL", "SELECT NULL = NULL"),
+    ("ordem_asc", "primeiro item de ORDER BY (1.0, NULL, 3.0), crescente",
+     "SELECT v FROM (SELECT 3.0 AS v UNION ALL SELECT NULL UNION ALL SELECT 1.0) ORDER BY v LIMIT 1"),
+    ("ordem_desc", "primeiro item de ORDER BY (1.0, NULL, 3.0), decrescente",
+     "SELECT v FROM (SELECT 3.0 AS v UNION ALL SELECT NULL UNION ALL SELECT 1.0) ORDER BY v DESC LIMIT 1"),
+    ("aspas_duplas", 'SELECT "abc"', 'SELECT "abc"'),
+    ("apelido_where", "apelido do SELECT usado no WHERE",
+     "SELECT v * 2 AS dobro FROM (SELECT 3.0 AS v UNION ALL SELECT 7.0) WHERE dobro > 10"),
+    ("mes_da_data", "mês de 2024-02-20 (strftime)", "SELECT strftime('%m', '2024-02-20')"),
+    ("dias_entre", "dias de 20/02 a 14/05/2024", "SELECT julianday('2024-05-14') - julianday('2024-02-20')"),
+    ("tipo_do_valor", "typeof(1)", "SELECT typeof(1)"),
+    ("data_impossivel", "data 2024-02-30", "SELECT date('2024-02-30')"),
+    ("round_flutuante", "ROUND(3.14159 como ponto flutuante, 1)", "SELECT ROUND(CAST(3.14159 AS REAL), 1)"),
+]
+dialeto_sqlite = {chave: resultado_no_sqlite(sql) for chave, _o_que, sql in SONDAS}
+
+# duas sondas que precisam de uma tabela
+dialeto_sqlite["abc_em_real"] = "entrou" if resultados_guarda[("solta", "abc")] == "ENTROU" else "recusado"
+lab = sqlite3.connect(":memory:")
+lab.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, nome TEXT)")
+lab.execute("INSERT INTO t (nome) VALUES ('a')")
+dialeto_sqlite["id_automatico"] = "id gerado: " + str(lab.execute("SELECT id FROM t").fetchone()[0])
+lab.close()
+SONDAS += [
+    ("abc_em_real", "gravar o texto 'abc' numa coluna REAL", None),
+    ("id_automatico", "INSERT sem informar o id, com id INTEGER PRIMARY KEY", None),
+]
+
+# REGISTRO (não é executado aqui): PostgreSQL 16.15, Ubuntu Linux, 08/10/2026
+POSTGRESQL_16_15 = {
+    "div_inteira": "3",
+    "div_real": "3.5000000000000000",
+    "div_zero": "ERRO: division by zero",
+    "cast_positivo": "8",
+    "cast_negativo": "-8",
+    "like_caixa": "falso",
+    "null_igual": "NULL",
+    "ordem_asc": "1.0",
+    "ordem_desc": "NULL",
+    "aspas_duplas": 'ERRO: column "abc" does not exist',
+    "apelido_where": 'ERRO: column "dobro" does not exist',
+    "mes_da_data": "ERRO: function strftime(unknown, unknown) does not exist",
+    "dias_entre": "84   (data - data, em inteiro)",
+    "tipo_do_valor": "ERRO: function typeof(integer) does not exist   (existe pg_typeof)",
+    "data_impossivel": 'ERRO: date/time field value out of range: "2024-02-30"',
+    "round_flutuante": "ERRO: function round(double precision, integer) does not exist   (só para numeric)",
+    "abc_em_real": 'recusado: invalid input syntax for type double precision: "abc"',
+    "id_automatico": 'ERRO: null value in column "id" of relation "t" violates not-null constraint',
+}
+
+for chave, o_que, _sql in SONDAS:
+    print(o_que)
+    print(f"   SQLite {sqlite3.sqlite_version} (ao vivo):   ", dialeto_sqlite[chave])
+    print("   PostgreSQL 16.15 (registro):", POSTGRESQL_16_15[chave])
+```
+
+(O rótulo do SQLite mostra a versão **do seu computador**; o do PostgreSQL é sempre a do registro.)
+
+Como ler a lista:
+
+* **Quando o SQLite diz sim e o PostgreSQL diz erro**, o PostgreSQL está sendo o estrito. Gravar `'abc'` numa coluna numérica, usar aspas duplas como texto, usar apelido no `WHERE`, dividir por zero (o SQLite devolve `NULL`) e escrever uma data impossível (`2024-02-30`, que o SQLite "corrige" para `2024-03-01` e o PostgreSQL recusa) passam no SQLite e falham no outro. Código que só roda no SQLite, por causa da tolerância, quebra ao mudar de banco.
+* **Quando os dois respondem, mas diferente**, não há aviso nenhum: `CAST(7.9 AS INTEGER)` dá 7 no SQLite (corta) e 8 no PostgreSQL (arredonda); `'ABC' LIKE 'abc'` é verdadeiro num e falso no outro (o PostgreSQL tem `ILIKE` para ignorar a caixa); o `NULL` fica no começo de um `ORDER BY` crescente no SQLite e no fim no PostgreSQL. Esses são os piores, porque o resultado muda sem um erro que denuncie.
+* **Quando uma função não existe no outro**, o erro é claro: `strftime`, `julianday` e `typeof` são do SQLite; no PostgreSQL usam-se `to_char` e `EXTRACT`, a subtração de datas e `pg_typeof`. O `ROUND(x, n)`, com duas entradas, só existe no PostgreSQL para `numeric`, e não para ponto flutuante.
+* **Onde os dois concordam:** a divisão entre inteiros corta nos dois (`7 / 2` é 3), e `NULL = NULL` é desconhecido nos dois. A lógica de três valores é do padrão, não do SQLite.
+
+Não para por aí: o `id INTEGER PRIMARY KEY` numerado sozinho é do SQLite. No PostgreSQL, a mesma tabela recusa a linha sem `id`; lá se escreve `id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY`, e o `INSERT` sem `id` funcionou nesse formato (registro de 08/10/2026).
+
+**A regra prática.** Aprenda o SQL pelo SQLite, mas **escreva** o mais perto do padrão que puder: aspas simples para texto, parênteses nos `AND`/`OR`, apelido só no `ORDER BY` e **sozinho** (no PostgreSQL, `ORDER BY dobro + 1` não aceita o apelido), `IS NOT NULL` ou `NULLS LAST` em vez de depender de onde o banco põe o `NULL`, `ROUND(x)` seguido de `CAST` quando quiser arredondar (em vez de contar com o que o `CAST` faz sozinho), e uma data sempre válida. **Nem tudo é portátil**, e este capítulo não finge que é: o `IS` com um valor (`valor IS NOT 135.0`, ou o `CHECK (date(data) IS data)` da nossa tabela; no PostgreSQL, a forma é `IS NOT DISTINCT FROM`), o `ROUND(x, n)` sobre um número real e o `COALESCE(valor, 'sem resultado')` com `valor` numérico (o PostgreSQL recusa misturar texto e número) funcionam no SQLite e falham no PostgreSQL 16.15 (conferido em 08/10/2026). Quando os dialetos divergirem de verdade (datas, por exemplo), isole a parte específica numa função ou numa consulta com nome, para trocar num lugar só.
+
+## Erros clássicos {#sec-p106-erros}
+
+1. **`WHERE coluna = NULL`.** Sempre zero linhas, sem erro. Use `IS NULL`.
+2. **Misturar `AND` e `OR` sem parênteses.** O `AND` é resolvido primeiro, e a consulta responde a outra pergunta.
+3. **Achar que "acima" e "não acima" somam o todo.** O ausente fica de fora das duas; trate o `NULL` primeiro (`CASE WHEN valor IS NULL ...`).
+4. **Tratar ausente como zero** (`COALESCE(valor, 0)` dentro de uma média). Sem aviso, subestima a variável.
+5. **`LIMIT` sem `ORDER BY`**, ou um `ORDER BY` crescente em que o `NULL` aparece primeiro e ocupa uma vaga.
+6. **Acreditar no tipo declarado.** No SQLite, `REAL` é sugestão; sem `CHECK` ou `STRICT`, `'abc'` entra.
+7. **Datas fora do formato ISO.** `14/05/2024` ordena errado e o `date()` devolve `NULL`.
+8. **Dividir dois inteiros esperando decimal.** `7 / 2` é 3; faça um lado real ou use `CAST`.
+9. **Aspas duplas para texto.** Funcionam no SQLite por tolerância e quebram no PostgreSQL.
+10. **Montar SQL juntando texto** (f-string com o valor dentro). Abre a porta da injeção; use `?` ou `:nome`. (O `?` vale para valores, nunca para nomes de tabela ou de coluna: esses só entram no texto depois de conferidos contra uma lista de nomes permitidos.)
+11. **Esquecer o `commit()`.** Os dados ficam só na transação; outra conexão não os vê.
+12. **`SELECT *` dentro de programas.** O resultado muda de forma quando a tabela ganha uma coluna.
+13. **Supor que o SQL que roda no SQLite roda no PostgreSQL.** Veja a @sec-p106-dialetos.
+14. **Conferir a resposta só olhando.** Sem uma segunda conta independente (em Python, em outra consulta), um erro silencioso passa.
+
+## Exercícios {#sec-p106-exercicios}
+
+Os gabaritos rodam na mesma sessão do capítulo (usam o banco `banco`, as constantes e as funções definidas acima). Tente sempre responder **antes** de abrir.
+
+**Exercício 1 (preveja as linhas).** Sem rodar, preveja quantas linhas devolve cada filtro: (a) `WHERE parametro = 'OD' OR parametro = 'pH' AND valor < 6`; (b) `WHERE (parametro = 'OD' OR parametro = 'pH') AND valor < 6`. Depois confira em SQL **e** em Python.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 1
+```python
+ex1_a = len(banco.execute("SELECT id FROM amostra WHERE parametro = 'OD' OR parametro = 'pH' AND valor < 6").fetchall())
+ex1_b = len(banco.execute("SELECT id FROM amostra WHERE (parametro = 'OD' OR parametro = 'pH') AND valor < 6").fetchall())
+py_a = sum(1 for _p, _d, par, v, _u in AMOSTRAS if par == "OD" or (par == "pH" and v is not None and v < 6))
+py_b = sum(1 for _p, _d, par, v, _u in AMOSTRAS if par in ("OD", "pH") and v is not None and v < 6)
+print(ex1_a, ex1_b, py_a, py_b)
+assert (ex1_a, ex1_b) == (py_a, py_b) == (8, 3)
+```
+Resultado: **8** e **3**. Em (a), o `AND` é resolvido primeiro: entram **todas** as 7 linhas de OD (a condição `parametro = 'OD'` basta) mais a linha de pH menor que 6 (5,8): 7 + 1 = 8. Em (b), com os parênteses, exige-se `valor < 6` das duas: OD 4,8 e 3,9, mais o pH 5,8: 3 linhas.
+:::
+
+**Exercício 2 (preveja o três valores).** Preveja o resultado de: (a) `NULL AND 0`; (b) `NULL OR 1`; (c) `NULL AND 1`; (d) `NOT NULL`; (e) `NULL = NULL`; (f) `NULL IS NULL`. Confira com as funções `e3`, `ou3` e `nao3` do capítulo **e** com o SQLite.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 2
+```python
+previsto = {"a": 0, "b": 1, "c": None, "d": None, "e": None, "f": 1}
+com_funcoes = {"a": e3(None, 0), "b": ou3(None, 1), "c": e3(None, 1), "d": nao3(None), "e": None, "f": 1}
+consultas = {"a": "NULL AND 0", "b": "NULL OR 1", "c": "NULL AND 1", "d": "NOT NULL", "e": "NULL = NULL", "f": "NULL IS NULL"}
+no_sqlite = {k: banco.execute("SELECT " + sql).fetchone()[0] for k, sql in consultas.items()}
+print(no_sqlite)
+assert previsto == com_funcoes == no_sqlite
+```
+Resultado: (a) **0** (falso: o 0 decide o `AND`); (b) **1** (verdadeiro: o 1 decide o `OR`); (c) **NULL** (o `AND` com verdadeiro depende do desconhecido); (d) **NULL**; (e) **NULL** (comparar com ausente é desconhecido, até com outro ausente); (f) **1**. As funções do capítulo valem para (a) a (d); (e) e (f) são comparações, não operadores lógicos, e foram conferidas direto no SQLite.
+:::
+
+**Exercício 3 (as duas maiores).** Escreva a consulta que devolve ponto, data e valor das **duas maiores medições de pH**. Confira em Python.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 3
+```python
+ex3_sql = banco.execute("SELECT ponto, data, valor FROM amostra WHERE parametro = 'pH' ORDER BY valor DESC LIMIT 2").fetchall()
+ex3_python = sorted(((p, d, v) for p, d, par, v, _u in AMOSTRAS if par == "pH"), key=lambda t: -t[2])[:2]
+print(ex3_sql)
+assert ex3_sql == ex3_python == [("P03", "2024-08-13", 7.4), ("P01", "2024-02-20", 7.2)]
+```
+Resultado: **7,4** em P03, em 13/08/2024, e **7,2** em P01, em 20/02/2024. Como não há `NULL` entre os pHs, o `DESC` não esconde nenhuma surpresa; numa coluna com ausentes, lembre do `IS NOT NULL` (Pergunta 3).
+:::
+
+**Exercício 4 (o dia da semana).** Em que dia da semana caiu cada campanha? Descubra em SQL (`strftime('%w', data)`, em que **0 é domingo**) e em Python (`isoweekday()`, em que **1 é segunda e 7 é domingo**), e diga em que dia da semana os dois métodos passam a divergir. Depois responda: quantos dias separam a campanha de agosto da de maio?
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 4
+```python
+ex4_sql = [r[1] for r in banco.execute("SELECT DISTINCT data, strftime('%w', data) FROM amostra ORDER BY data")]
+ex4_python = [datetime.date.fromisoformat(d).isoweekday() for d in sorted({a[1] for a in AMOSTRAS})]
+dias_ago_mai = banco.execute("SELECT CAST(ROUND(julianday('2024-08-13') - julianday('2024-05-14')) AS INTEGER)").fetchone()[0]
+dias_py = (datetime.date(2024, 8, 13) - datetime.date(2024, 5, 14)).days
+print(ex4_sql, ex4_python, dias_ago_mai, dias_py)
+assert ex4_sql == ["2", "2", "2"] and ex4_python == [2, 2, 2] and dias_ago_mai == dias_py == 91
+```
+Resultado: as três campanhas caíram numa **terça-feira** (`'2'` em SQL, `2` em Python), e agosto veio **91 dias** (13 semanas) depois de maio. Os dois números coincidem de segunda a sábado e divergem só no **domingo** (0 no SQL; 7 no `isoweekday()`). E há uma terceira convenção à espreita: o `weekday()` do Python começa a segunda-feira em 0 e daria **1** para a terça. Declare a convenção antes de comparar. Repare ainda que o SQL devolveu **texto** (`'2'`) e o Python, **número** (`2`).
+:::
+
+**Exercício 5 (afinidade pelas cinco regras).** Preveja a afinidade de `FLOATING POINT`, `CHARINT`, `DATETIME` e `VARCHAR(10)` com as cinco regras e confira com `afinidade()` e com o SQLite (`o_que_foi_guardado`). Algum resultado o surpreendeu?
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 5
+```python
+previsao = {"FLOATING POINT": "INTEGER", "CHARINT": "INTEGER", "DATETIME": "NUMERIC", "VARCHAR(10)": "TEXT"}
+esperado_do_banco = {"INTEGER": ("integer", "integer"), "NUMERIC": ("integer", "integer"), "TEXT": ("text", "text")}
+for tipo, aff in previsao.items():
+    assert afinidade(tipo) == aff, tipo
+    assert o_que_foi_guardado(tipo) == esperado_do_banco[aff], tipo
+    print(f"{tipo:15} {aff:8} {o_que_foi_guardado(tipo)}")
+```
+Resultado: `FLOATING POINT` e `CHARINT` têm afinidade **`INTEGER`**, porque contêm a sequência `INT` (em `POINT` e em `CHARINT`), e a regra 1 vem **antes** da regra de `CHAR`. `DATETIME` cai em **`NUMERIC`** (a regra 5, a "sobra"), e `VARCHAR(10)` em **`TEXT`**. A surpresa esperada é a do `FLOATING POINT`, que parece "ponto flutuante" e se comporta como inteiro.
+:::
+
+**Exercício 6 (as recusas da tabela).** Numa **cópia** do banco, mostre que a tabela `amostra` recusa (a) a data `2024-02-30`; (b) o valor de texto `'abc'`; (c) um ponto `NULL`; e aceita (d) um valor `NULL`. A cópia evita sujar o banco do capítulo.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do exercício 6
+```python
+copia = sqlite3.connect(":memory:")
+banco.backup(copia)
+modelo = "INSERT INTO amostra (ponto, data, parametro, valor, unidade) VALUES (?, ?, ?, ?, ?)"
+ex6 = {
+    "a": tentar(copia, modelo, ("P01", "2024-02-30", "OD", 7.0, "mg/L")),
+    "b": tentar(copia, modelo, ("P01", "2024-02-20", "OD", "abc", "mg/L")),
+    "c": tentar(copia, modelo, (None, "2024-02-20", "OD", 7.0, "mg/L")),
+    "d": tentar(copia, modelo, ("P01", "2024-02-20", "OD", None, "mg/L")),
+}
+linhas_na_copia = copia.execute("SELECT COUNT(*) FROM amostra").fetchone()[0]
+copia.close()
+for chave, texto in ex6.items():
+    print(chave, texto)
+assert ex6["a"].startswith("RECUSADO") and ex6["b"].startswith("RECUSADO") and ex6["c"].startswith("RECUSADO")
+assert ex6["d"] == "ENTROU" and linhas_na_copia == 21
+assert banco.execute("SELECT COUNT(*) FROM amostra").fetchone()[0] == 20
+```
+Resultado: (a), (b) e (c) são **recusados**, com mensagens `CHECK constraint failed` (a e b) e `NOT NULL constraint failed: amostra.ponto` (c); (d) **entra**, porque o `valor` pode faltar. A cópia ficou com 21 linhas; o banco do capítulo continua com 20.
+:::
+
+**Desafio (o relatório de conformidade).** Escreva **uma única consulta** que devolva, para as 20 amostras, o `id` e uma situação: `'sem resultado'`, `'fora'` ou `'conforme'`, usando o limite certo para cada parâmetro (OD mínimo, pH dentro da faixa, turbidez máxima). Use as constantes nomeadas, passadas por **parâmetros nomeados** (`:nome`, com um dicionário), como na Pergunta 5. Confira as 20 linhas contra uma função em Python.
+
+::: {.callout-tip collapse="true"}
+## Gabarito do desafio
+```python
+sql_desafio = """
+SELECT id,
+       CASE WHEN valor IS NULL THEN 'sem resultado'
+            WHEN parametro = 'OD'       AND valor < :od_min                    THEN 'fora'
+            WHEN parametro = 'pH'       AND (valor < :ph_min OR valor > :ph_max) THEN 'fora'
+            WHEN parametro = 'turbidez' AND valor > :tur_max                   THEN 'fora'
+            ELSE 'conforme'
+       END AS situacao
+FROM amostra
+ORDER BY id
+"""
+limites = {"od_min": OD_MINIMO_MG_L, "ph_min": PH_MINIMO, "ph_max": PH_MAXIMO, "tur_max": TURBIDEZ_MAXIMA_UNT}
+desafio_sql = banco.execute(sql_desafio, limites).fetchall()
+
+
+def situacao_python(parametro, valor):
+    if valor is None:
+        return "sem resultado"
+    fora = {"OD": valor < OD_MINIMO_MG_L,
+            "pH": valor < PH_MINIMO or valor > PH_MAXIMO,
+            "turbidez": valor > TURBIDEZ_MAXIMA_UNT}[parametro]
+    return "fora" if fora else "conforme"
+
+
+desafio_python = [(i, situacao_python(par, v)) for i, (_p, _d, par, v, _u) in enumerate(AMOSTRAS, start=1)]
+contagem_desafio = {s: sum(1 for _i, x in desafio_sql if x == s) for s in ("fora", "conforme", "sem resultado")}
+print(contagem_desafio)
+assert desafio_sql == desafio_python
+assert contagem_desafio == {"fora": 4, "conforme": 15, "sem resultado": 1}
+```
+Resultado: **4** amostras fora (os ids 6, 10, 16 e 17: a turbidez de 135 UNT, os dois OD baixos de P02 e o pH 5,8), **15** conformes e **1** sem resultado (o id 18), totalizando as 20. O ramo `IS NULL` é indispensável (sem ele, o ausente cairia no `ELSE` e seria dado como `'conforme'`); pô-lo primeiro, como na Pergunta 4, é só um bom hábito de leitura. O `id` é o número que o SQLite deu na ordem em que inserimos; por isso a comparação com `enumerate(..., start=1)` funciona **neste** capítulo, mas é uma ligação frágil: num banco real, case pelas colunas, não pela posição.
+:::
+
+## Entregável {#sec-p106-entregavel}
+
+No **seu repositório de treino** (o do P0-00), tudo por issue e pull request:
+
+1. crie `qualidade_agua/amostras.py` com as constantes (limites e fonte) e a lista de amostras; troque ou acrescente **pelo menos duas** amostras suas, inventadas, com um `NULL` entre elas;
+2. crie `qualidade_agua/consultas.py` com as cinco perguntas como funções que recebem a conexão e devolvem uma lista de tuplas;
+3. crie `tests/test_consultas.py` que compara **cada** função com o cálculo equivalente em Python sobre a lista original (o molde da @sec-p106-pratica);
+4. inclua um teste que **prova a armadilha do `NULL`**: mostre que `valor = NULL` devolve zero linhas e que `IS NULL` encontra a amostra sem resultado;
+5. abra um issue "Consultas de qualidade da água", resolva-o por pull request com `Closes #N`, veja os testes ficarem verdes no GitHub e registre a mudança no `CHANGELOG.md`;
+6. no Notion, marque o *Nível atual* do módulo P1-06 e a data da próxima revisão.
+
+Se você tem **dados reais** de uma estação que pode usar, carregue-os com o mesmo esquema e repita as cinco perguntas, **sem preencher os valores que faltam**: um ausente é `NULL`, nunca zero.
+
+## Autoavaliação {#sec-p106-autoavaliacao}
+
+| Nível | Você consegue... |
+|:--|:--|
+| **1 · Reconheço** | Dizer o que são tabela, linha, coluna, chave primária e `NULL`; ler um `SELECT` com `WHERE`, `ORDER BY` e `LIMIT`; reconhecer `CASE`, `COALESCE` e `strftime`. |
+| **2 · Explico** | Explicar a ordem em que o banco lê uma consulta; por que `= NULL` nunca acha nada e por que "acima" e "não acima" não somam o todo; o que é afinidade de tipos e por que `POINT` é inteiro; por que `7 / 2` dá 3; e três diferenças entre o SQLite e o PostgreSQL. |
+| **3 · Executo** | Criar uma tabela com restrições, inserir dados com parâmetros, escrever as cinco perguntas da @sec-p106-pratica sem consultar, e conferir cada resposta contra um cálculo independente em Python. |
+| **4 · Ensino** | Montar uma aula de 40 minutos em que cada aluno planeja uma pegadinha de `NULL` ou de tipo numa tabela de medições, e a turma prevê (antes de rodar) o que o banco devolve, discutindo por que a resposta "quase certa" é a mais perigosa. |
+
+## O que foi testado e o que não foi {#sec-p106-limites}
+
+**Testado:** todo o código do capítulo roda de ponta a ponta, em ordem, no Linux, com Python 3.13 e SQLite 3.45.1, e os números citados no texto são conferidos por testes (`tests/test_modulo_p1.py`). As cinco perguntas, as regras de afinidade e a lógica de três valores foram comparadas com cálculo independente em Python.
+
+**Não testado:**
+
+* o código **não foi executado no Windows** nem com outras versões do SQLite (as tabelas `STRICT` só existem a partir da 3.37.0, e o capítulo trata essa ausência);
+* o registro do **PostgreSQL** (versão 16.15, Linux, 08/10/2026) é uma execução real, mas **não é reexecutado** pelos testes, e outras versões do PostgreSQL podem diferir;
+* a **renderização** pelo Quarto e a aparência das figuras no site publicado;
+* se resoluções posteriores à CONAMA 357/2005 (como a 410/2009 e a 430/2011) alteraram os três limites usados. Os dados são **sintéticos**, mas os limites têm fonte: confira a versão consolidada antes de usá-los em trabalho real;
+* os programas de interface (DB Browser for SQLite, o cliente de linha de comando `sqlite3`, extensões do VS Code), que o capítulo não usa.
+
+## Para ir além {#sec-p106-alem}
+
+* **O próximo passo:** o P1-07 (SQL essencial II) ensina `GROUP BY` e agregações (média, soma, contagem), `HAVING` e `JOIN`; o P1-08 (SQL essencial III), subconsultas, restrições e transações; e o P3-09 e o P3-12 levam o SQL a um servidor e a um aplicativo.
+* **Documentação do SQLite**, na ordem do capítulo: *Datatypes In SQLite* (sqlite.org/datatype3.html), *SELECT* (sqlite.org/lang_select.html), *Expressions* (sqlite.org/lang_expr.html), *Date And Time Functions* (sqlite.org/lang_datefunc.html) e *STRICT Tables* (sqlite.org/stricttables.html).
+* **PostgreSQL:** o *Tutorial* (postgresql.org/docs/16/tutorial.html) e, para as diferenças que vimos, os capítulos de tipos de dados e de funções de data e hora da mesma documentação.
+* **Resolução CONAMA nº 357/2005:** use o texto consolidado, no site do CONAMA ou do órgão ambiental da sua região, e confira as alterações posteriores.
+* **A matéria-prima dos dados reais:** as séries de qualidade da água dos órgãos estaduais e do Sistema Nacional de Informações sobre Recursos Hídricos (ANA) são o passo seguinte, com a regra de sempre: guarde o ausente como `NULL`.
+
+```{python}
+#| label: p106-fim
+#| echo: false
+banco.close()
+```
